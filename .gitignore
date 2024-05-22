@@ -105,3 +105,5 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+# envrc
+.direnv
