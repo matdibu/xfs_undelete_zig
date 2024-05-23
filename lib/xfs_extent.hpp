@@ -1,7 +1,7 @@
 #ifndef _XFS_EXTENT_HPP_
 #define _XFS_EXTENT_HPP_
 
-#include "xfs_superblock.h" // xfs_superblock_t
+#include <xfs/xfs.h> // xfs_superblock_t
 
 #include <linux/types.h>
 

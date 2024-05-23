@@ -11,6 +11,7 @@ pub fn build(b: *std.Build) void {
     });
     libxfs_undelete.linkLibCpp();
     libxfs_undelete.linkSystemLibrary("spdlog");
+    libxfs_undelete.linkSystemLibrary("handle");
 
     const cflags = [_][]const u8{
         "-Wall",

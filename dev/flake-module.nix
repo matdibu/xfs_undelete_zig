@@ -11,6 +11,8 @@
           spdlog
           spdlog.dev
           pkg-config
+          libxfs
+          linuxHeaders
         ];
       };
 

@@ -7,7 +7,7 @@ using uf::xfs::InodeEntry;
 
 InodeEntry::InodeEntry(
     const utils::LinuxFile& Disk,
-    const xfs_superblock_t& Superblock,
+    const xfs_dsb&          Superblock,
     uint64_t                InodeNumber,
     uint32_t                Blocksize,
     std::vector<Extent>     Extents,

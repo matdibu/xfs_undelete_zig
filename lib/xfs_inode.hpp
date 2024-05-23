@@ -2,7 +2,7 @@
 #define _XFS_INODE_HPP_
 
 #include "xfs_extent.hpp" // extent_t
-#include "xfs_types.h"
+#include <xfs/xfs_types.h>
 
 #include <linux/types.h>
 #include <vector> // std::vector
