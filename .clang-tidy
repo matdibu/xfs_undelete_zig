@@ -1,0 +1,23 @@
+Checks:
+'*,
+-modernize-use-trailing-return-type,
+-fuchsia-overloaded-operator,
+-cppcoreguidelines-pro-type-reinterpret-cast,
+-clang-diagnostic-cast-qual,
+-*-default-arguments-calls,
+-*-magic-numbers,
+-*-braces-around-statements,
+-*-pointer-arithmetic,
+-*-pointer-decay,
+-*-vararg,
+-*-weak-vtables,
+-*-pro-type-cstyle-cast,
+-*-no-array-decay,
+-*-old-style-cast,
+-llvmlibc-*,
+-*-pro-type-union-access'
+
+FormatStyle:     file
+
+#HeaderFilterRegex: '(pandora|undelete).*\.hpp'
+HeaderFilterRegex: '.*'
