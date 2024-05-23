@@ -1,0 +1,16 @@
+.{
+    .name = "xfs_undelete",
+    .version = "0.0.1",
+    .paths = .{
+        "lib",
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+    },
+    .dependencies = .{
+        // .spdlog = .{
+        //     .url = "git+https://github.com/gabime/spdlog#v1.14.1",
+        //     .hash = "122066fc25f5e8829f0ad7163322056ee707a40f7fa234b9f536cff7dcf50bd2e84b",
+        // },
+    },
+}
