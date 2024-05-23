@@ -2,7 +2,7 @@
 #define _XFS_PARSER_HPP_
 
 #include "linux_file.hpp" // utils::LinuxFile
-//#include "undelete_xfs/undelete_xfs_callback_interface.hpp" // uf::xfs::IInodeCallback
+// #include "undelete_xfs/undelete_xfs_callback_interface.hpp" // uf::xfs::IInodeCallback
 #include "xfs_inode_entry.hpp"
 
 namespace uf::xfs {

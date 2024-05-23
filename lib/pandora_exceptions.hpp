@@ -1,7 +1,6 @@
 #ifndef _PANDORA_EXCEPTIONS_HPP_
 #define _PANDORA_EXCEPTIONS_HPP_
 
-
 #include <exception>
 
 #include <string>

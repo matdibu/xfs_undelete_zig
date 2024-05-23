@@ -2,8 +2,8 @@
 #define _XFS_TYPES_H_
 
 #include <cstdint>
-#include <linux/types.h>
 #include <ctime>
+#include <linux/types.h>
 
 typedef uint64_t xfs_fsblock_t;   /* blockno in filesystem (agno|agbno) */
 typedef uint64_t xfs_rfsblock_t;  /* blockno in filesystem (raw) */

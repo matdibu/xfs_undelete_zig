@@ -15,10 +15,10 @@ template <typename T>
 struct utils::SingletonHeap
 {
 public:
-    SingletonHeap(const SingletonHeap&) = delete;
+    SingletonHeap(const SingletonHeap&)            = delete;
     SingletonHeap& operator=(const SingletonHeap&) = delete;
 
-    SingletonHeap(SingletonHeap&&) = delete;
+    SingletonHeap(SingletonHeap&&)            = delete;
     SingletonHeap& operator=(SingletonHeap&&) = delete;
 
     static T* GetInstance()
@@ -55,7 +55,7 @@ public:
     virtual void Init() {}
 
 protected:
-    SingletonHeap() = default;
+    SingletonHeap()          = default;
     virtual ~SingletonHeap() = default;
 
 private:
@@ -68,10 +68,10 @@ template <typename T>
 struct utils::SingletonLazy
 {
 public:
-    SingletonLazy(const SingletonLazy&) = delete;
+    SingletonLazy(const SingletonLazy&)            = delete;
     SingletonLazy& operator=(const SingletonLazy&) = delete;
-    SingletonLazy(SingletonLazy&&) = delete;
-    SingletonLazy& operator=(SingletonLazy&&) = delete;
+    SingletonLazy(SingletonLazy&&)                 = delete;
+    SingletonLazy& operator=(SingletonLazy&&)      = delete;
 
     static T& GetInstance()
     {
