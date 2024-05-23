@@ -3,19 +3,15 @@
   imports = [ inputs.treefmt-nix.flakeModule ];
 
   perSystem =
-    { pkgs, system, ... }:
-    let
-      zig-pkg = inputs.zig.packages.${system}.master;
-    in
+    { pkgs, ... }:
     {
       devShells.default = pkgs.mkShell {
-        packages =
-          [ zig-pkg ]
-          ++ (with inputs.nixpkgs.legacyPackages.${system}; [
-            spdlog
-            spdlog.dev
-            pkg-config
-          ]);
+        packages = with pkgs; [
+          zig
+          spdlog
+          spdlog.dev
+          pkg-config
+        ];
       };
 
       treefmt = {
@@ -24,13 +20,8 @@
           nixfmt-rfc-style.enable = true;
           deadnix.enable = true;
           statix.enable = true;
-          zig = {
-            enable = true;
-            package = zig-pkg;
-          };
-        };
-        settings.formatter = {
-          statix.excludes = [ "auto-generated.nix" ];
+          zig.enable = true;
+          clang-format.enable = true;
         };
       };
     };
