@@ -1,12 +1,12 @@
 #!/bin/sh
 
-set -xe
+set -e
 
 DEVICE_IMG="$(realpath xfs_device.img)"
 MOUNT_DIR="mount"
 UNDELETED_DIR="undeleted"
 
-dd if=/dev/zero of="${DEVICE_IMG}" bs=4M count=512
+dd if=/dev/zero of="${DEVICE_IMG}" bs=4M count=128
 mkfs.xfs "${DEVICE_IMG}" -f
 
 mkdir -p "${MOUNT_DIR}"
@@ -28,6 +28,6 @@ rm -r "${MOUNT_DIR}"
 
 zig build run -- --device "${DEVICE_IMG}" --output "${UNDELETED_DIR}"
 
-rm -f "${DEVICE_IMG}"
+# rm -f "${DEVICE_IMG}"
 
 sudo chown -R "$(id -un)":"$(id -gn)" "${UNDELETED_DIR}"
