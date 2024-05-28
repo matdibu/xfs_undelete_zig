@@ -1,1 +1,5 @@
-undeleted
+# used in testing
+undeleted/
+recovered/
+xfs_device.img
+xfs_undelete/
