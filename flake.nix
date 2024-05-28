@@ -33,11 +33,11 @@
         default = pkgs.mkShellNoCC {
           packages = with pkgs; [
             zig
-            spdlog
             spdlog.dev
             pkg-config
             libxfs
-            linuxHeaders
+            libuuid.dev
+            python3
           ];
         };
       });
