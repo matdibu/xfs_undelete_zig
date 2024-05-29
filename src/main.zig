@@ -87,5 +87,5 @@ fn run() !void {
     defer output_dir.close();
 
     var parser: xp.xfs_parser = .{ .device_path = config.device };
-    try parser.dump_inodes(xfs_callback);
+    try parser.dump_inodes(&xfs_callback);
 }

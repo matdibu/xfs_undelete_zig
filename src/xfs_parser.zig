@@ -1,10 +1,13 @@
 const std = @import("std");
 
-const xp = @import("./inode_entry.zig");
-pub const inode_entry = xp.inode_entry;
+pub const inode_entry = @import("./inode_entry.zig").inode_entry;
+pub const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
+pub const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
+pub const btree_walk = @import("./btree_walk.zig");
 
 const c = @cImport({
     @cDefine("ASSERT", "");
+    @cInclude("stddef.h");
     @cInclude("xfs/xfs.h");
     @cInclude("xfs/xfs_arch.h");
     @cInclude("xfs/xfs_format.h");
@@ -14,39 +17,23 @@ const xfs_error = error{
     sb_magic,
     agf_magic,
     agi_magic,
+    no_0_start_offset,
 };
 
-pub const callback_t = fn (*inode_entry) anyerror!void;
-
-const treewalk_callback_t = struct {
-    parser: *const xfs_parser = undefined,
-    callback: *const callback_t = undefined,
-
-    pub fn call(self: *treewalk_callback_t, ag_index: c.xfs_agnumber_t, inobt_rec: c.xfs_inobt_rec_t, agf_root: u32) void {
-        return self.parser.inode_btree_callback(ag_index, inobt_rec, agf_root, self.callback);
-    }
-};
-
-pub fn btree_walk(device: std.fs.File, superblock: c.xfs_dsb, ag_index: c.xfs_agnumber_t, agi_root: u32, magic: u32, agf_block_number_root: u32, cb: treewalk_callback_t) !void {
-    _ = device;
-    _ = superblock;
-    _ = ag_index;
-    _ = agi_root;
-    _ = magic;
-    _ = agf_block_number_root;
-    _ = cb;
-}
+pub const callback_t = fn (*const inode_entry) anyerror!void;
 
 pub const xfs_parser = struct {
     device_path: []const u8,
     device: std.fs.File = undefined,
     superblock: c.xfs_dsb = undefined,
 
-    pub fn dump_inodes(self: *xfs_parser, comptime callback: callback_t) !void {
+    pub fn dump_inodes(self: *xfs_parser, callback: *const callback_t) !void {
         try self.read_superblock();
 
         var ag_free_space_header: c.xfs_agf_t = .{};
         var ag_inode_management_header: c.xfs_agi_t = .{};
+
+        const cb: btree_walk.treewalk_callback_t(c.xfs_inobt_rec_t) = .{ .parser = self, .callback = callback };
 
         var ag_index: c.xfs_agnumber_t = 0;
         while (ag_index < c.be32toh(self.superblock.sb_agcount)) : (ag_index += 1) {
@@ -63,19 +50,100 @@ pub const xfs_parser = struct {
             }
 
             const agf_block_number_root = c.be32toh(ag_free_space_header.agf_roots[c.XFS_BTNUM_BNOi]);
-            var cb: treewalk_callback_t = .{ .parser = self, .callback = callback };
-            cb.parser = self;
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_RO_COMPAT_FINOBT)) {
                 std.log.info("dumping finobt in ag#{d}", .{ag_index});
-                try btree_walk(self.device, self.superblock, ag_index, c.be32toh(ag_inode_management_header.agi_free_root), c.XFS_FIBT_CRC_MAGIC, agf_block_number_root, cb);
+                try btree_walk.btree_walk(c.xfs_inobt_ptr_t, c.xfs_inobt_rec_t, self.device, self.superblock, ag_index, c.be32toh(ag_inode_management_header.agi_free_root), c.XFS_FIBT_CRC_MAGIC, agf_block_number_root, cb);
             } else {
                 std.log.info("dumping inobt in ag#{d}", .{ag_index});
-                try btree_walk(self.device, self.superblock, ag_index, c.be32toh(ag_inode_management_header.agi_root), c.XFS_IBT_CRC_MAGIC, agf_block_number_root, cb);
+                try btree_walk.btree_walk(c.xfs_inobt_ptr_t, c.xfs_inobt_rec_t, self.device, self.superblock, ag_index, c.be32toh(ag_inode_management_header.agi_root), c.XFS_IBT_CRC_MAGIC, agf_block_number_root, cb);
             }
         }
 
         var entry: inode_entry = .{};
         return callback(&entry);
+    }
+
+    pub fn inode_btree_callback(self: *const xfs_parser, ag_index: c.xfs_agnumber_t, inobt_rec: c.xfs_inobt_rec_t, agf_root: u32, cb: *const callback_t) !void {
+        var current_inode = c.be32toh(inobt_rec.ir_startino);
+        const start_inode = current_inode;
+        var free_mask = c.be64toh(inobt_rec.ir_free);
+        var hole_mask = c.be16toh(inobt_rec.ir_u.sp.ir_holemask);
+
+        while (0 != free_mask) {
+            if (self.has_incompat_feature(c.XFS_SB_FEAT_INCOMPAT_SPINODES) and 0 != (hole_mask & 1)) {
+                hole_mask >>= 1;
+                free_mask >>= 4;
+                current_inode += 4;
+                continue;
+            }
+            if (0 != (free_mask & 1)) {
+                std.log.info("[{d}] attempting recovery", .{current_inode});
+
+                const inode: xfs_inode_t = try self.read_inode(ag_index, current_inode, agf_root);
+
+                const entry: inode_entry = inode_entry.create(inode);
+
+                try cb(&entry);
+            }
+
+            free_mask >>= 1;
+            current_inode += 1;
+            if (((current_inode - start_inode) % 4) == 0) {
+                hole_mask >>= 1;
+            }
+        }
+    }
+
+    fn only_within_agf(self: *const xfs_parser, extent: xfs_extent_t, ag_index: c.xfs_agnumber_t, agf_root: u32, recovered_extents: *std.ArrayList(xfs_extent_t)) !void {
+        _ = self;
+        _ = extent;
+        _ = ag_index;
+        _ = agf_root;
+        _ = recovered_extents;
+    }
+
+    fn read_inode(self: *const xfs_parser, ag_index: c.xfs_agnumber_t, current_inode: u32, agf_root: u32) !xfs_inode_t {
+        const full_inode_size: u16 = c.be16toh(self.superblock.sb_inodesize);
+
+        var extent_recovered_from_list = std.ArrayList(xfs_extent_t).init(std.heap.page_allocator);
+
+        var inode_header: c.xfs_dinode = .{};
+        const blocks_per_ag: c.xfs_agblock_t = c.be32toh(self.superblock.sb_agblocks);
+        const block_size: u32 = c.be32toh(self.superblock.sb_blocksize);
+
+        const ag_offset: u64 = ag_index * blocks_per_ag * block_size;
+
+        const seek_offset = ag_offset + current_inode * full_inode_size;
+
+        _ = try self.device.pread(std.mem.asBytes(&inode_header), seek_offset);
+
+        const number_of_extents = (full_inode_size - @sizeOf(c.xfs_dinode)) / @sizeOf(c.xfs_bmbt_rec_t);
+        var packed_extents = try std.ArrayList(c.xfs_bmbt_rec_t).initCapacity(std.heap.page_allocator, number_of_extents);
+
+        _ = try self.device.pread(std.mem.asBytes(&packed_extents), seek_offset + @sizeOf(c.xfs_dinode));
+
+        for (packed_extents.items) |packed_extent| {
+            const extent = xfs_extent_t.create(packed_extent);
+            if (!extent.is_valid(self.superblock)) {
+                continue;
+            }
+            try self.only_within_agf(extent, ag_index, agf_root, &extent_recovered_from_list);
+        }
+
+        var has_0_offset = false;
+        for (extent_recovered_from_list.items) |extent| {
+            if (extent.get_file_offset() == 0) {
+                has_0_offset = true;
+            }
+        }
+        if (!has_0_offset) {
+            return xfs_error.no_0_start_offset;
+        }
+
+        return xfs_inode_t.create(
+            inode_header,
+            &extent_recovered_from_list,
+        );
     }
 
     fn read_superblock(self: *xfs_parser) !void {

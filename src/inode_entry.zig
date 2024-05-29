@@ -1,7 +1,13 @@
 const std = @import("std");
 
+const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
+
 pub const inode_entry = struct {
     const data = "hello world!";
+    pub fn create(xfs_inode: xfs_inode_t) inode_entry {
+        _ = xfs_inode;
+        return inode_entry{};
+    }
     pub fn get_inode_number(self: *const inode_entry) usize {
         _ = self;
         return 1;
