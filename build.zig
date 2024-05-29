@@ -17,13 +17,13 @@ pub fn build(b: *std.Build) void {
     xfs_undelete.root_module.addImport("zig-cli", zigcli_mod);
 
     xfs_undelete.addSystemIncludePath(.{
-        .path = "/nix/store/23v80anf3q5zip8ldlps7hzijnj0gx8w-xfsprogs-6.6.0-dev/include",
+        .cwd_relative = "/nix/store/23v80anf3q5zip8ldlps7hzijnj0gx8w-xfsprogs-6.6.0-dev/include",
     });
     xfs_undelete.addSystemIncludePath(.{
-        .path = "/nix/store/sw3a1cypmpgh8gvlhhxby0wl9f80wg53-util-linux-minimal-2.40.1-dev/include",
+        .cwd_relative = "/nix/store/sw3a1cypmpgh8gvlhhxby0wl9f80wg53-util-linux-minimal-2.40.1-dev/include",
     });
     xfs_undelete.addSystemIncludePath(.{
-        .path = "/nix/store/2hmd2c81sv9qpdh49xvcyvr6m1iahrs5-linux-6.9.2-dev/lib/modules/6.9.2/source/include",
+        .cwd_relative = "/nix/store/2hmd2c81sv9qpdh49xvcyvr6m1iahrs5-linux-6.9.2-dev/lib/modules/6.9.2/source/include",
     });
 
     b.installArtifact(xfs_undelete);
