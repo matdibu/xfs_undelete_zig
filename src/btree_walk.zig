@@ -151,7 +151,6 @@ fn btree_walk_records(
 
     // std.log.info("records.items={x}", .{records.items.ptr});
     for (records.items) |record| {
-        std.log.info("processing record", .{});
         try cb.call(ag_index, record, agf_block_number_root);
     }
 }
