@@ -45,14 +45,16 @@ pub fn main() !void {
 
 fn save_file(entry: *xp.inode_entry) !void {
     var file_name: [std.mem.page_size:0]u8 = undefined;
-    _ = try std.fmt.bufPrintZ(&file_name, "{s}/{d}", .{ config.output, entry.inode_number });
+    _ = try std.fmt.bufPrintZ(&file_name, "{d}", .{entry.inode_number});
 
-    std.log.info("starting to undelete file '{s}'", .{file_name});
+    std.log.info("starting to undelete file '{s}', size={d}", .{ file_name, entry.get_file_size() });
 
     var bytes_left: usize = entry.get_file_size();
 
-    const file = try std.fs.cwd().createFileZ(&file_name, .{});
+    var dir = try std.fs.cwd().openDir(config.output, .{});
+    const file = try dir.createFileZ(&file_name, .{});
     defer file.close();
+    defer dir.close();
 
     var offset: usize = undefined;
     var size: usize = undefined;
@@ -61,21 +63,18 @@ fn save_file(entry: *xp.inode_entry) !void {
     var buffer: [std.mem.page_size]u8 = undefined;
 
     while (bytes_left != 0) {
-        if (entry.get_next_available_offset(&offset, &size)) |_| {
-            bytes_read = 0;
-            std.log.info("buffer len is {d}", .{buffer.len});
+        entry.get_next_available_offset(&offset, &size);
+        bytes_read = 0;
+        std.log.info("buffer len is {d}", .{buffer.len});
+        bytes_to_read = @min(size, buffer.len);
+        while (bytes_to_read != 0) {
+            try entry.get_file_content(&buffer, offset, bytes_to_read, &bytes_read);
+            std.log.info("bytes_left={d}, size={d}, bytes_to_read={d}, bytes_read={d}", .{ bytes_left, size, bytes_to_read, bytes_read });
+            bytes_left -= bytes_read;
+            size -= bytes_read;
             bytes_to_read = @min(size, buffer.len);
-            while (bytes_to_read != 0) {
-                try entry.get_file_content(&buffer, offset, bytes_to_read, &bytes_read);
-                std.log.info("bytes_left={d}, size={d}, bytes_to_read={d}, bytes_read={d}", .{ bytes_left, size, bytes_to_read, bytes_read });
-                bytes_left -= bytes_read;
-                size -= bytes_read;
-                bytes_to_read = @min(size, buffer.len);
-                _ = try file.pwrite(buffer[0..bytes_read], offset);
-                std.log.info("wrote {d} bytes at offset {d}", .{ bytes_read, offset });
-            }
-        } else {
-            break;
+            _ = try file.pwrite(buffer[0..bytes_read], offset);
+            std.log.info("wrote {d} bytes at offset {d}", .{ bytes_read, offset });
         }
     }
 }

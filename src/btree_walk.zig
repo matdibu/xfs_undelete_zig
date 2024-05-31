@@ -115,7 +115,7 @@ fn btree_walk_pointers(
 
     const offset = (btree_header_size(btree_ptr_t) + c.be32toh(superblock.sb_blocksize)) / 2;
 
-    _ = try device.pread(std.mem.asBytes(pointers.items.ptr), seek_offset + offset);
+    _ = try device.pread(std.mem.sliceAsBytes(pointers.items), seek_offset + offset);
 
     for (pointers.items) |pointer| {
         try btree_walk(btree_ptr_t, btree_rec_t, device, superblock, ag_index, c.be32toh(pointer), magic, agf_block_number_root, cb);
@@ -145,7 +145,7 @@ fn btree_walk_records(
 
     std.log.info("records.items.len={}", .{records.items.len});
 
-    _ = try device.pread(std.mem.asBytes(records.items.ptr), seek_offset + btree_header_size(btree_ptr_t));
+    _ = try device.pread(std.mem.sliceAsBytes(records.items), seek_offset + btree_header_size(btree_ptr_t));
 
     std.log.info("records.items[0]={}", .{records.items[0]});
 

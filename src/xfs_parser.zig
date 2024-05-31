@@ -111,7 +111,7 @@ pub const xfs_parser = struct {
                         &self.superblock,
                         inode.inode,
                         block_size,
-                        inode.extents.allocatedSlice(),
+                        inode.extents, //.allocatedSlice(),
                     );
 
                     std.log.info("[{d}] created inode_entry {}", .{ current_inode, inode_entry });
@@ -156,6 +156,8 @@ pub const xfs_parser = struct {
             .state = extent.state,
         };
 
+        std.log.info("relative_extent={}", .{relative_extent});
+
         if (relative_extent.block_offset > c.be32toh(agf_header.agf_length)) {
             std.log.info("extent's block_offset={} is beyond the Allocation Group length={}", .{
                 relative_extent.block_offset,
@@ -181,6 +183,7 @@ pub const xfs_parser = struct {
         extent_end: *u64,
         recovered_extents: *std.ArrayList(xfs_extent_t),
     ) !void {
+        std.log.info("tree_checking extent={}", .{extent.*});
         const block_size: u32 = c.be32toh(self.superblock.sb_blocksize);
 
         var btree_block: c.xfs_btree_block = .{};
@@ -188,6 +191,7 @@ pub const xfs_parser = struct {
 
         const number_of_records = c.be16toh(btree_block.bb_numrecs);
         if (c.be16toh(btree_block.bb_level) > 0) {
+            std.log.info("tree_checking leaf level={}", .{c.be16toh(btree_block.bb_level)});
             var keys = std.ArrayList(c.xfs_alloc_key_t).init(allocator);
             var ptrs = std.ArrayList(c.xfs_alloc_ptr_t).init(allocator);
 
@@ -196,7 +200,7 @@ pub const xfs_parser = struct {
 
             const max_no_of_records = (block_size - btree_walk.btree_header_size(c.xfs_alloc_ptr_t)) / (@sizeOf(c.xfs_alloc_key_t) + @sizeOf(c.xfs_alloc_ptr_t));
 
-            _ = try self.device.pread(std.mem.asBytes(keys.items.ptr), block_offset + btree_walk.btree_header_size(c.xfs_alloc_ptr_t));
+            _ = try self.device.pread(std.mem.sliceAsBytes(keys.items), block_offset + btree_walk.btree_header_size(c.xfs_alloc_ptr_t));
 
             for (keys.items, 0..) |key, i| {
                 keys.items[i].ar_blockcount = c.be32toh(key.ar_blockcount);
@@ -205,7 +209,7 @@ pub const xfs_parser = struct {
 
             const ptrs_offset = btree_walk.btree_header_size(c.xfs_alloc_ptr_t) + max_no_of_records * @sizeOf(c.xfs_alloc_key_t);
 
-            _ = try self.device.pread(std.mem.asBytes(keys.items.ptr), block_offset + ptrs_offset);
+            _ = try self.device.pread(std.mem.sliceAsBytes(keys.items), block_offset + ptrs_offset);
 
             for (ptrs.items, 0..) |ptr, i| {
                 ptrs.items[i] = c.be32toh(ptr);
@@ -230,22 +234,37 @@ pub const xfs_parser = struct {
             const seek_offset = ag_offset + ptrs.items[right] * block_size;
             return self.tree_check(extent, ag_offset, seek_offset, extent_begin, extent_end, recovered_extents);
         } else {
+            std.log.info("tree_checking leaf level={}", .{c.be16toh(btree_block.bb_level)});
             var recs = std.ArrayList(c.xfs_alloc_rec_t).init(allocator);
             try recs.resize(number_of_records);
 
-            _ = try self.device.pread(
-                std.mem.asBytes(recs.items.ptr),
+            const read_no = try self.device.pread(
+                std.mem.sliceAsBytes(recs.items),
                 block_offset + btree_walk.btree_header_size(c.xfs_alloc_ptr_t),
             );
 
-            var left_index: i16 = 0;
-            var right_index: i16 = @intCast(number_of_records - 1);
-            var middle_index: i16 = 0;
+            std.log.info("read {} bytes", .{read_no});
+
+            for (recs.items) |rec| {
+                std.log.info("rec start={}, count={}", .{
+                    c.be32toh(rec.ar_startblock),
+                    c.be32toh(rec.ar_blockcount),
+                });
+            }
+
+            var left_index: u64 = 0;
+            var right_index: u64 = @intCast(number_of_records - 1);
+            var middle_index: u64 = 0;
+
+            std.log.info("starting matching with left={}, right={}", .{ left_index, right_index });
 
             while (left_index <= right_index) {
+                std.log.info("matching with left_index={x}, right_index={x}", .{ left_index, right_index });
+                std.log.info("and extent_begin={x}, extent_end={x}", .{ extent_begin.*, extent_end.* });
                 middle_index = @divFloor(left_index + right_index, 2);
                 const record_begin: u64 = c.be32toh(recs.items[@intCast(middle_index)].ar_startblock);
                 const record_end: u64 = record_begin + c.be32toh(recs.items[@intCast(middle_index)].ar_blockcount);
+                std.log.info("and record_begin={x}, record_end={x}", .{ record_begin, record_end });
 
                 if (extent_begin.* > record_end) {
                     left_index = middle_index + 1;
@@ -302,7 +321,7 @@ pub const xfs_parser = struct {
         const number_of_extents = (full_inode_size - @sizeOf(c.xfs_dinode)) / @sizeOf(c.xfs_bmbt_rec_t);
         var packed_extents = std.ArrayList(c.xfs_bmbt_rec_t).init(allocator);
         try packed_extents.resize(number_of_extents);
-        _ = try self.device.pread(std.mem.asBytes(packed_extents.items.ptr), seek_offset + @sizeOf(c.xfs_dinode));
+        _ = try self.device.pread(std.mem.sliceAsBytes(packed_extents.items), seek_offset + @sizeOf(c.xfs_dinode));
 
         for (packed_extents.items) |packed_extent| {
             const extent = xfs_extent_t.create(&packed_extent);
@@ -311,6 +330,8 @@ pub const xfs_parser = struct {
             }
             try self.only_within_agf(&extent, ag_index, agf_root, &extent_recovered_from_list);
         }
+
+        std.log.info("extent_recovered_from_list: {any}", .{extent_recovered_from_list.items});
 
         var has_0_offset = false;
         for (extent_recovered_from_list.items) |extent| {
@@ -325,7 +346,7 @@ pub const xfs_parser = struct {
 
         return xfs_inode_t.create(
             &inode_header,
-            &extent_recovered_from_list,
+            try extent_recovered_from_list.toOwnedSlice(),
         );
     }
 
