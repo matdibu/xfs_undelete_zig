@@ -1,31 +1,70 @@
 const std = @import("std");
 
+const c = @import("c.zig").c;
+
 const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
+const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
 
 pub const inode_entry = struct {
-    const data = "hello world!";
-    pub fn create(xfs_inode: xfs_inode_t) inode_entry {
-        _ = xfs_inode;
-        return inode_entry{};
-    }
-    pub fn get_inode_number(self: *const inode_entry) usize {
-        _ = self;
-        return 1;
+    device: *std.fs.File,
+    superblock: *const c.xfs_dsb,
+    inode_number: u64,
+    block_size: u32,
+    extents: []xfs_extent_t,
+    iterator: usize,
+    pub fn create(
+        device: *std.fs.File,
+        superblock: *const c.xfs_dsb,
+        inode_number: u64,
+        block_size: u32,
+        extents: []xfs_extent_t,
+    ) inode_entry {
+        return inode_entry{
+            .device = device,
+            .superblock = superblock,
+            .inode_number = inode_number,
+            .block_size = block_size,
+            .extents = extents,
+            .iterator = 0,
+        };
     }
     pub fn get_file_size(self: *const inode_entry) usize {
-        _ = self;
-        return data.len;
+        var result: u64 = 0;
+
+        for (self.extents) |extent| {
+            result += extent.block_count * self.block_size;
+        }
+
+        return result;
     }
-    pub fn get_next_available_offset(self: *const inode_entry, offset: *usize, size: *usize) !void {
-        _ = self;
-        offset.* = 0;
-        size.* = data.len;
+    pub fn get_next_available_offset(self: *inode_entry, offset: *usize, size: *usize) ?void {
+        if (self.iterator == self.extents.len) {
+            return null;
+        }
+        self.iterator += 1;
+
+        offset.* = self.extents[self.iterator].file_offset;
+        size.* = self.extents[self.iterator].block_count * self.block_size;
     }
     pub fn get_file_content(self: *const inode_entry, buffer: []u8, offset: usize, bytes_to_read: usize, bytes_read: *usize) !void {
-        _ = self;
-        _ = offset;
-        _ = bytes_to_read;
-        @memcpy(buffer[0..data.len], data);
-        bytes_read.* = data.len;
+        bytes_read.* = 0;
+        var bytes_left = bytes_to_read;
+        var current_offset = offset;
+
+        for (self.extents) |extent| {
+            const end_file_offset: u64 = extent.file_offset + extent.block_count * self.block_size;
+            if (current_offset >= extent.file_offset and current_offset <= end_file_offset) {
+                const start_in_bytes = extent.block_offset * self.block_size;
+                const target_offset = start_in_bytes + current_offset - extent.file_offset;
+                const target_size = @min(bytes_left, end_file_offset - current_offset);
+                _ = try self.device.pread(buffer[0..bytes_to_read], target_offset);
+                bytes_read.* += target_size;
+                current_offset += target_size;
+                bytes_left -= target_size;
+                if (bytes_left == 0) {
+                    return;
+                }
+            }
+        }
     }
 };

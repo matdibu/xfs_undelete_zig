@@ -3,7 +3,9 @@ const cli = @import("zig-cli");
 
 const xp = @import("./xfs_parser.zig");
 
-const allocator = std.heap.page_allocator;
+// const allocator = std.heap.page_allocator;
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
 
 var config = struct {
     device: []const u8 = undefined,
@@ -41,9 +43,9 @@ pub fn main() !void {
     return r.run(&app);
 }
 
-fn save_file(entry: *const xp.inode_entry) !void {
+fn save_file(entry: *xp.inode_entry) !void {
     var file_name: [std.mem.page_size:0]u8 = undefined;
-    _ = try std.fmt.bufPrintZ(&file_name, "{s}/{d}", .{ config.output, entry.get_inode_number() });
+    _ = try std.fmt.bufPrintZ(&file_name, "{s}/{d}", .{ config.output, entry.inode_number });
 
     std.log.info("starting to undelete file '{s}'", .{file_name});
 
@@ -59,24 +61,27 @@ fn save_file(entry: *const xp.inode_entry) !void {
     var buffer: [std.mem.page_size]u8 = undefined;
 
     while (bytes_left != 0) {
-        try entry.get_next_available_offset(&offset, &size);
-        bytes_read = 0;
-        std.log.info("buffer len is {d}", .{buffer.len});
-        bytes_to_read = @min(size, buffer.len);
-        while (bytes_to_read != 0) {
-            try entry.get_file_content(&buffer, offset, bytes_to_read, &bytes_read);
-            std.log.info("bytes_left={d}, size={d}, bytes_to_read={d}, bytes_read={d}", .{ bytes_left, size, bytes_to_read, bytes_read });
-            bytes_left -= bytes_read;
-            size -= bytes_read;
+        if (entry.get_next_available_offset(&offset, &size)) |_| {
+            bytes_read = 0;
+            std.log.info("buffer len is {d}", .{buffer.len});
             bytes_to_read = @min(size, buffer.len);
-            _ = try file.pwrite(buffer[0..bytes_read], offset);
-            std.log.info("wrote {d} bytes at offset {d}", .{ bytes_read, offset });
+            while (bytes_to_read != 0) {
+                try entry.get_file_content(&buffer, offset, bytes_to_read, &bytes_read);
+                std.log.info("bytes_left={d}, size={d}, bytes_to_read={d}, bytes_read={d}", .{ bytes_left, size, bytes_to_read, bytes_read });
+                bytes_left -= bytes_read;
+                size -= bytes_read;
+                bytes_to_read = @min(size, buffer.len);
+                _ = try file.pwrite(buffer[0..bytes_read], offset);
+                std.log.info("wrote {d} bytes at offset {d}", .{ bytes_read, offset });
+            }
+        } else {
+            break;
         }
     }
 }
 
-fn xfs_callback(entry: *const xp.inode_entry) !void {
-    std.log.info("inode={d}, file_size={d}", .{ entry.get_inode_number(), entry.get_file_size() });
+fn xfs_callback(entry: *xp.inode_entry) !void {
+    std.log.info("inode={d}, file_size={d}", .{ entry.inode_number, entry.get_file_size() });
     try save_file(entry);
 }
 
@@ -87,5 +92,5 @@ fn run() !void {
     defer output_dir.close();
 
     var parser: xp.xfs_parser = .{ .device_path = config.device };
-    try parser.dump_inodes(&xfs_callback);
+    try parser.dump_inodes(xfs_callback);
 }

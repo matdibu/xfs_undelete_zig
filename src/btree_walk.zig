@@ -5,13 +5,12 @@ pub const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
 pub const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
 pub const xfs_parser = @import("./xfs_parser.zig").xfs_parser;
 
-const c = @cImport({
-    @cDefine("ASSERT", "");
-    @cInclude("stddef.h");
-    @cInclude("xfs/xfs.h");
-    @cInclude("xfs/xfs_arch.h");
-    @cInclude("xfs/xfs_format.h");
-});
+// const allocator = std.testing.allocator;
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
+
+const c_patched = @import("./c.zig");
+const c = c_patched.c;
 
 const xfs_error = error{
     sb_magic,
@@ -21,13 +20,13 @@ const xfs_error = error{
     btree_block_magic,
 };
 
-pub const callback_t = fn (*const inode_entry) anyerror!void;
+pub const callback_t = fn (*inode_entry) anyerror!void;
 
 pub fn treewalk_callback_t(
     comptime btree_rec_t: type,
 ) type {
     return struct {
-        parser: *const xfs_parser = undefined,
+        parser: *xfs_parser = undefined,
         callback: *const callback_t,
 
         pub fn call(
@@ -41,10 +40,10 @@ pub fn treewalk_callback_t(
     };
 }
 
-fn btree_header_size(comptime btree_ptr_t: type) usize {
+pub fn btree_header_size(comptime btree_ptr_t: type) usize {
     return switch (@sizeOf(btree_ptr_t)) {
-        4 => c.XFS_BTREE_SBLOCK_CRC_LEN,
-        8 => c.XFS_BTREE_LBLOCK_CRC_LEN,
+        4 => c_patched.XFS_BTREE_SBLOCK_CRC_LEN,
+        8 => c_patched.XFS_BTREE_LBLOCK_CRC_LEN,
         else => @compileError("btree_ptr_t does not have a matching XFS_BTREE_*BLOCK_CRC_LEN"),
     };
 }
@@ -53,20 +52,36 @@ pub fn btree_walk(
     comptime btree_ptr_t: type,
     comptime btree_rec_t: type,
     device: std.fs.File,
-    superblock: c.xfs_dsb,
+    superblock: *const c.xfs_dsb,
     ag_index: c.xfs_agnumber_t,
-    agi_root: u32,
+    agi_root: btree_ptr_t,
     magic: u32,
     agf_block_number_root: u32,
     cb: treewalk_callback_t(btree_rec_t),
-) !void {
+) anyerror!void {
     var block: c.xfs_btree_block = .{};
 
-    const seek_offset = c.be32toh(superblock.sb_blocksize) * c.be32toh(superblock.sb_agblocks) * ag_index + agi_root;
+    const seek_offset: u64 = @as(u64, c.be32toh(superblock.sb_blocksize)) * (@as(u64, c.be32toh(superblock.sb_agblocks)) * @as(u64, ag_index) + @as(u64, agi_root));
+
+    std.log.info("btree_walk seek_offset={}", .{seek_offset});
+
+    std.log.info("sb.sb_blocksize={}, sb.sb_agblocks={}, ag_index={}, agi_root={}", .{
+        c.be32toh(superblock.sb_blocksize),
+        c.be32toh(superblock.sb_agblocks),
+        ag_index,
+        agi_root,
+    });
 
     _ = try device.pread(std.mem.asBytes(&block), seek_offset);
 
     if (magic != c.be32toh(block.bb_magic)) {
+        std.log.err("bad btree magic at offset {x}, expected '{s}'/{x}, got '{s}'/{x}", .{
+            seek_offset,
+            std.mem.asBytes(&magic)[0..4],
+            magic,
+            std.mem.asBytes(&block.bb_magic)[0..4],
+            block.bb_magic,
+        });
         return xfs_error.btree_block_magic;
     }
 
@@ -81,10 +96,10 @@ fn btree_walk_pointers(
     comptime btree_ptr_t: type,
     comptime btree_rec_t: type,
     device: std.fs.File,
-    superblock: c.xfs_dsb,
+    superblock: *const c.xfs_dsb,
     ag_index: c.xfs_agnumber_t,
     block: c.xfs_btree_block,
-    seek_offset: u32,
+    seek_offset: u64,
     magic: u32,
     agf_block_number_root: u32,
     cb: treewalk_callback_t(btree_rec_t),
@@ -93,11 +108,14 @@ fn btree_walk_pointers(
 
     const no_of_pointers = (c.be32toh(superblock.sb_blocksize) - btree_header_size(btree_ptr_t)) / (@sizeOf(btree_ptr_t) * 2);
 
-    var pointers = try std.ArrayList(btree_ptr_t).initCapacity(std.heap.page_allocator, no_of_pointers);
+    // var pointers = try std.ArrayList(btree_ptr_t).initCapacity(allocator, no_of_pointers);
+    var pointers = std.ArrayList(btree_ptr_t).init(allocator);
+    try pointers.resize(no_of_pointers);
+    defer pointers.deinit();
 
     const offset = (btree_header_size(btree_ptr_t) + c.be32toh(superblock.sb_blocksize)) / 2;
 
-    _ = try device.pread(std.mem.asBytes(&pointers), seek_offset + offset);
+    _ = try device.pread(std.mem.asBytes(pointers.items.ptr), seek_offset + offset);
 
     for (pointers.items) |pointer| {
         try btree_walk(btree_ptr_t, btree_rec_t, device, superblock, ag_index, c.be32toh(pointer), magic, agf_block_number_root, cb);
@@ -108,22 +126,32 @@ fn btree_walk_records(
     comptime btree_ptr_t: type,
     comptime btree_rec_t: type,
     device: std.fs.File,
-    superblock: c.xfs_dsb,
+    superblock: *const c.xfs_dsb,
     ag_index: c.xfs_agnumber_t,
     block: c.xfs_btree_block,
-    seek_offset: u32,
+    seek_offset: u64,
     agf_block_number_root: u32,
     cb: treewalk_callback_t(btree_rec_t),
 ) !void {
     _ = block;
 
     const no_of_records = (c.be32toh(superblock.sb_blocksize) - btree_header_size(btree_ptr_t)) / @sizeOf(btree_rec_t);
+    std.log.info("no_of_records={}", .{no_of_records});
 
-    var records = try std.ArrayList(btree_rec_t).initCapacity(std.heap.page_allocator, no_of_records);
+    // var records = try std.ArrayList(btree_rec_t).initCapacity(allocator, no_of_records);
+    var records = std.ArrayList(btree_rec_t).init(allocator);
+    try records.resize(no_of_records);
+    defer records.deinit();
 
-    _ = try device.pread(std.mem.asBytes(&records), seek_offset + btree_header_size(btree_ptr_t));
+    std.log.info("records.items.len={}", .{records.items.len});
 
+    _ = try device.pread(std.mem.asBytes(records.items.ptr), seek_offset + btree_header_size(btree_ptr_t));
+
+    std.log.info("records.items[0]={}", .{records.items[0]});
+
+    // std.log.info("records.items={x}", .{records.items.ptr});
     for (records.items) |record| {
+        std.log.info("processing record", .{});
         try cb.call(ag_index, record, agf_block_number_root);
     }
 }
