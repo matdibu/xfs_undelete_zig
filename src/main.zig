@@ -4,7 +4,7 @@ const cli = @import("zig-cli");
 const xp = @import("./xfs_parser.zig");
 
 // const allocator = std.heap.page_allocator;
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
 const allocator = gpa.allocator();
 
 var config = struct {
@@ -40,7 +40,9 @@ pub fn main() !void {
         },
     };
 
-    return r.run(&app);
+    try r.run(&app);
+
+    std.log.info("leaks? {}", .{gpa.detectLeaks()});
 }
 
 fn save_file(entry: *xp.inode_entry) !void {
@@ -90,6 +92,8 @@ fn run() !void {
     var output_dir = try std.fs.cwd().makeOpenPath(config.output, .{});
     defer output_dir.close();
 
-    var parser: xp.xfs_parser = .{ .device_path = config.device };
+    // var parser: xp.xfs_parser = .{ .device_path = config.device };
+    var parser = xp.xfs_parser.init(allocator);
+    parser.device_path = config.device;
     try parser.dump_inodes(xfs_callback);
 }

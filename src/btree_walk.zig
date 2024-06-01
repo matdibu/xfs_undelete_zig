@@ -5,10 +5,6 @@ pub const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
 pub const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
 pub const xfs_parser = @import("./xfs_parser.zig").xfs_parser;
 
-// const allocator = std.testing.allocator;
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const allocator = gpa.allocator();
-
 const c_patched = @import("./c.zig");
 const c = c_patched.c;
 
@@ -51,6 +47,7 @@ pub fn btree_header_size(comptime btree_ptr_t: type) usize {
 pub fn btree_walk(
     comptime btree_ptr_t: type,
     comptime btree_rec_t: type,
+    allocator: std.mem.Allocator,
     device: std.fs.File,
     superblock: *const c.xfs_dsb,
     ag_index: c.xfs_agnumber_t,
@@ -86,15 +83,16 @@ pub fn btree_walk(
     }
 
     if (c.be32toh(block.bb_level) > 0) {
-        return btree_walk_pointers(btree_ptr_t, btree_rec_t, device, superblock, ag_index, block, seek_offset, magic, agf_block_number_root, cb);
+        return btree_walk_pointers(btree_ptr_t, btree_rec_t, allocator, device, superblock, ag_index, block, seek_offset, magic, agf_block_number_root, cb);
     }
 
-    return btree_walk_records(btree_ptr_t, btree_rec_t, device, superblock, ag_index, block, seek_offset, agf_block_number_root, cb);
+    return btree_walk_records(btree_ptr_t, btree_rec_t, allocator, device, superblock, ag_index, block, seek_offset, agf_block_number_root, cb);
 }
 
 fn btree_walk_pointers(
     comptime btree_ptr_t: type,
     comptime btree_rec_t: type,
+    allocator: std.mem.Allocator,
     device: std.fs.File,
     superblock: *const c.xfs_dsb,
     ag_index: c.xfs_agnumber_t,
@@ -118,13 +116,14 @@ fn btree_walk_pointers(
     _ = try device.pread(std.mem.sliceAsBytes(pointers.items), seek_offset + offset);
 
     for (pointers.items) |pointer| {
-        try btree_walk(btree_ptr_t, btree_rec_t, device, superblock, ag_index, c.be32toh(pointer), magic, agf_block_number_root, cb);
+        try btree_walk(btree_ptr_t, btree_rec_t, allocator, device, superblock, ag_index, c.be32toh(pointer), magic, agf_block_number_root, cb);
     }
 }
 
 fn btree_walk_records(
     comptime btree_ptr_t: type,
     comptime btree_rec_t: type,
+    allocator: std.mem.Allocator,
     device: std.fs.File,
     superblock: *const c.xfs_dsb,
     ag_index: c.xfs_agnumber_t,

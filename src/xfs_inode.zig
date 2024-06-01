@@ -20,12 +20,12 @@ pub const xfs_inode_err = error{
 };
 
 pub const xfs_inode_t = struct {
-    extents: []xfs_extent_t,
+    extents: std.ArrayList(xfs_extent_t),
     inode: c.xfs_ino_t,
 
     pub fn create(
         inode_header: *const c.xfs_dinode,
-        extent_recovered_from_list: []xfs_extent_t,
+        extent_recovered_from_list: std.ArrayList(xfs_extent_t),
     ) xfs_inode_err!xfs_inode_t {
         if (c.XFS_DINODE_MAGIC != c.be16toh(inode_header.di_magic)) {
             return xfs_inode_err.bad_magic;
@@ -50,10 +50,10 @@ pub const xfs_inode_t = struct {
     }
 
     pub fn extents(self: *const xfs_inode_t) []xfs_extent_t {
-        return self.extents;
+        return self.extents.items;
     }
 
-    pub fn deinit(self: *xfs_inode_t) void {
+    pub fn deinit(self: *const xfs_inode_t) void {
         self.extents.deinit();
     }
 };

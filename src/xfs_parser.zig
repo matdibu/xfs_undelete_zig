@@ -6,10 +6,6 @@ pub const xfs_inode_err = @import("./xfs_inode.zig").xfs_inode_err;
 pub const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
 pub const btree_walk = @import("./btree_walk.zig");
 
-// const allocator = std.testing.allocator;
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const allocator = gpa.allocator();
-
 const c = @import("./c.zig").c;
 
 const xfs_error = error{
@@ -22,9 +18,14 @@ const xfs_error = error{
 pub const callback_t = fn (*inode_entry) anyerror!void;
 
 pub const xfs_parser = struct {
-    device_path: []const u8,
+    allocator: std.mem.Allocator,
+    device_path: []const u8 = undefined,
     device: std.fs.File = undefined,
     superblock: c.xfs_dsb = undefined,
+
+    pub fn init(allocator: std.mem.Allocator) xfs_parser {
+        return .{ .allocator = allocator };
+    }
 
     pub fn dump_inodes(self: *xfs_parser, callback: *const callback_t) !void {
         try self.read_superblock();
@@ -57,6 +58,7 @@ pub const xfs_parser = struct {
                 try btree_walk.btree_walk(
                     c.xfs_inobt_ptr_t,
                     c.xfs_inobt_rec_t,
+                    self.allocator,
                     self.device,
                     &self.superblock,
                     ag_index,
@@ -70,6 +72,7 @@ pub const xfs_parser = struct {
                 try btree_walk.btree_walk(
                     c.xfs_inobt_ptr_t,
                     c.xfs_inobt_rec_t,
+                    self.allocator,
                     self.device,
                     &self.superblock,
                     ag_index,
@@ -103,6 +106,7 @@ pub const xfs_parser = struct {
                 const inode_or_err = self.read_inode(ag_index, current_inode, agf_root);
 
                 if (inode_or_err) |inode| {
+                    defer inode.deinit();
                     std.log.info("[{d}] read inode", .{current_inode});
 
                     const block_size = c.be32toh(self.superblock.sb_blocksize);
@@ -192,8 +196,10 @@ pub const xfs_parser = struct {
         const number_of_records = c.be16toh(btree_block.bb_numrecs);
         if (c.be16toh(btree_block.bb_level) > 0) {
             std.log.info("tree_checking leaf level={}", .{c.be16toh(btree_block.bb_level)});
-            var keys = std.ArrayList(c.xfs_alloc_key_t).init(allocator);
-            var ptrs = std.ArrayList(c.xfs_alloc_ptr_t).init(allocator);
+            var keys = std.ArrayList(c.xfs_alloc_key_t).init(self.allocator);
+            defer keys.deinit();
+            var ptrs = std.ArrayList(c.xfs_alloc_ptr_t).init(self.allocator);
+            defer ptrs.deinit();
 
             try keys.resize(number_of_records);
             try ptrs.resize(number_of_records);
@@ -235,7 +241,8 @@ pub const xfs_parser = struct {
             return self.tree_check(extent, ag_offset, seek_offset, extent_begin, extent_end, recovered_extents);
         } else {
             std.log.info("tree_checking leaf level={}", .{c.be16toh(btree_block.bb_level)});
-            var recs = std.ArrayList(c.xfs_alloc_rec_t).init(allocator);
+            var recs = std.ArrayList(c.xfs_alloc_rec_t).init(self.allocator);
+            defer recs.deinit();
             try recs.resize(number_of_records);
 
             const read_no = try self.device.pread(
@@ -306,7 +313,7 @@ pub const xfs_parser = struct {
     fn read_inode(self: *const xfs_parser, ag_index: c.xfs_agnumber_t, current_inode: u32, agf_root: u32) !xfs_inode_t {
         const full_inode_size: u16 = c.be16toh(self.superblock.sb_inodesize);
 
-        var extent_recovered_from_list = std.ArrayList(xfs_extent_t).init(allocator);
+        var extent_recovered_from_list = std.ArrayList(xfs_extent_t).init(self.allocator);
 
         var inode_header: c.xfs_dinode = .{};
         const blocks_per_ag: c.xfs_agblock_t = c.be32toh(self.superblock.sb_agblocks);
@@ -319,7 +326,8 @@ pub const xfs_parser = struct {
         _ = try self.device.pread(std.mem.asBytes(&inode_header), seek_offset);
 
         const number_of_extents = (full_inode_size - @sizeOf(c.xfs_dinode)) / @sizeOf(c.xfs_bmbt_rec_t);
-        var packed_extents = std.ArrayList(c.xfs_bmbt_rec_t).init(allocator);
+        var packed_extents = std.ArrayList(c.xfs_bmbt_rec_t).init(self.allocator);
+        defer packed_extents.deinit();
         try packed_extents.resize(number_of_extents);
         _ = try self.device.pread(std.mem.sliceAsBytes(packed_extents.items), seek_offset + @sizeOf(c.xfs_dinode));
 
@@ -346,7 +354,7 @@ pub const xfs_parser = struct {
 
         return xfs_inode_t.create(
             &inode_header,
-            try extent_recovered_from_list.toOwnedSlice(),
+            extent_recovered_from_list,
         );
     }
 

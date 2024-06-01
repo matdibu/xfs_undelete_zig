@@ -10,16 +10,16 @@ pub const inode_entry = struct {
     superblock: *const c.xfs_dsb,
     inode_number: u64,
     block_size: u32,
-    extents: []xfs_extent_t,
+    extents: std.ArrayList(xfs_extent_t),
     iterator: usize,
     pub fn create(
         device: *std.fs.File,
         superblock: *const c.xfs_dsb,
         inode_number: u64,
         block_size: u32,
-        extents: []xfs_extent_t,
+        extents: std.ArrayList(xfs_extent_t),
     ) inode_entry {
-        std.log.info("extents len is {}", .{extents.len});
+        std.log.info("extents len is {}", .{extents.items.len});
         return inode_entry{
             .device = device,
             .superblock = superblock,
@@ -32,21 +32,21 @@ pub const inode_entry = struct {
     pub fn get_file_size(self: *const inode_entry) usize {
         var result: u64 = 0;
 
-        std.log.info("get_file_size: {any}", .{self.extents});
+        std.log.info("get_file_size: {any}", .{self.extents.items});
 
-        for (self.extents) |extent| {
+        for (self.extents.items) |extent| {
             result += extent.block_count * self.block_size;
         }
 
         return result;
     }
     pub fn get_next_available_offset(self: *inode_entry, offset: *usize, size: *usize) void {
-        if (self.iterator == self.extents.len) {
+        if (self.iterator == self.extents.items.len) {
             return;
         }
 
-        offset.* = self.extents[self.iterator].file_offset;
-        size.* = self.extents[self.iterator].block_count * self.block_size;
+        offset.* = self.extents.items[self.iterator].file_offset;
+        size.* = self.extents.items[self.iterator].block_count * self.block_size;
 
         self.iterator += 1;
     }
@@ -55,7 +55,7 @@ pub const inode_entry = struct {
         var bytes_left = bytes_to_read;
         var current_offset = offset;
 
-        for (self.extents) |extent| {
+        for (self.extents.items) |extent| {
             const end_file_offset: u64 = extent.file_offset + extent.block_count * self.block_size;
             if (current_offset >= extent.file_offset and current_offset <= end_file_offset) {
                 const start_in_bytes = extent.block_offset * self.block_size;
