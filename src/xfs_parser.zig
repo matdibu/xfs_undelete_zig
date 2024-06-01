@@ -4,18 +4,13 @@ pub const inode_entry = @import("./inode_entry.zig").inode_entry;
 pub const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
 pub const xfs_inode_err = @import("./xfs_inode.zig").xfs_inode_err;
 pub const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
+pub const xfs_error = @import("./xfs_error.zig").xfs_error;
+
 pub const btree_walk = @import("./btree_walk.zig");
 
 const c = @import("./c.zig").c;
 
-const xfs_error = error{
-    sb_magic,
-    agf_magic,
-    agi_magic,
-    no_0_start_offset,
-};
-
-pub const callback_t = fn (*inode_entry) anyerror!void;
+pub const callback_t = fn (*inode_entry) void;
 
 pub const xfs_parser = struct {
     allocator: std.mem.Allocator,
@@ -85,7 +80,7 @@ pub const xfs_parser = struct {
         }
     }
 
-    pub fn inode_btree_callback(self: *xfs_parser, ag_index: c.xfs_agnumber_t, inobt_rec: c.xfs_inobt_rec_t, agf_root: u32, cb: *const callback_t) !void {
+    pub fn inode_btree_callback(self: *xfs_parser, ag_index: c.xfs_agnumber_t, inobt_rec: c.xfs_inobt_rec_t, agf_root: u32, cb: *const callback_t) void {
         var current_inode = c.be32toh(inobt_rec.ir_startino);
         const start_inode = current_inode;
         var free_mask = c.be64toh(inobt_rec.ir_free);
@@ -111,7 +106,7 @@ pub const xfs_parser = struct {
                         inode.extents,
                     );
 
-                    try cb(&entry);
+                    cb(&entry);
                 } else |err| switch (err) {
                     xfs_inode_err.bad_magic,
                     xfs_inode_err.non_zero_mode,
@@ -120,7 +115,7 @@ pub const xfs_parser = struct {
                     xfs_inode_err.format_is_not_extents,
                     xfs_error.no_0_start_offset,
                     => std.log.debug("skipping inode #{}, reason: {}", .{ current_inode, err }),
-                    else => return err,
+                    else => unreachable,
                 }
             }
 

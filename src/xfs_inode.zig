@@ -2,14 +2,9 @@ const std = @import("std");
 
 pub const inode_entry = @import("./inode_entry.zig").inode_entry;
 pub const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
+pub const xfs_error = @import("./xfs_error.zig").xfs_error;
 
 const c = @import("./c.zig").c;
-
-const xfs_error = error{
-    sb_magic,
-    agf_magic,
-    agi_magic,
-};
 
 pub const xfs_inode_err = error{
     bad_magic,
