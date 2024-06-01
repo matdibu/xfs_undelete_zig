@@ -92,7 +92,6 @@ pub const xfs_parser = struct {
         var hole_mask = c.be16toh(inobt_rec.ir_u.sp.ir_holemask);
 
         while (0 != free_mask) {
-            std.log.info("free_mask={x}", .{free_mask});
             if (self.has_incompat_feature(c.XFS_SB_FEAT_INCOMPAT_SPINODES) and 0 != (hole_mask & 1)) {
                 std.log.info("[{d}] spare inode hole", .{current_inode});
                 hole_mask >>= 1;
@@ -101,35 +100,30 @@ pub const xfs_parser = struct {
                 continue;
             }
             if (0 != (free_mask & 1)) {
-                std.log.info("[{d}] attempting recovery", .{current_inode});
-
-                const inode_or_err = self.read_inode(ag_index, current_inode, agf_root);
-
-                if (inode_or_err) |inode| {
+                if (self.read_inode(ag_index, current_inode, agf_root)) |inode| {
                     defer inode.deinit();
-                    std.log.info("[{d}] read inode", .{current_inode});
-
                     const block_size = c.be32toh(self.superblock.sb_blocksize);
                     var entry: inode_entry = inode_entry.create(
                         &self.device,
                         &self.superblock,
                         inode.inode,
                         block_size,
-                        inode.extents, //.allocatedSlice(),
+                        inode.extents,
                     );
 
-                    std.log.info("[{d}] created inode_entry {}", .{ current_inode, inode_entry });
-
                     try cb(&entry);
-
-                    std.log.info("[{d}] returned from cb", .{current_inode});
                 } else |err| switch (err) {
-                    xfs_inode_err.bad_magic => {},
-                    else => {},
+                    xfs_inode_err.bad_magic,
+                    xfs_inode_err.non_zero_mode,
+                    xfs_inode_err.non_zero_nlink,
+                    xfs_inode_err.version_not_3,
+                    xfs_inode_err.format_is_not_extents,
+                    xfs_error.no_0_start_offset,
+                    => std.log.debug("skipping inode #{}, reason: {}", .{ current_inode, err }),
+                    else => return err,
                 }
             }
 
-            std.log.info("[{d}] continuing", .{current_inode});
             free_mask >>= 1;
             current_inode += 1;
             if (((current_inode - start_inode) % 4) == 0) {
@@ -139,11 +133,6 @@ pub const xfs_parser = struct {
     }
 
     fn only_within_agf(self: *const xfs_parser, extent: *const xfs_extent_t, ag_index: c.xfs_agnumber_t, agf_root: u32, recovered_extents: *std.ArrayList(xfs_extent_t)) !void {
-        std.log.info("extracting free extents from block_offset={}, file_offset={}, block_count={}", .{
-            extent.block_offset,
-            extent.file_offset,
-            extent.block_count,
-        });
         const blocks_per_ag = c.be32toh(self.superblock.sb_agblocks);
         const block_size = c.be32toh(self.superblock.sb_blocksize);
         const ag_offset = ag_index * blocks_per_ag * block_size;
@@ -160,10 +149,8 @@ pub const xfs_parser = struct {
             .state = extent.state,
         };
 
-        std.log.info("relative_extent={}", .{relative_extent});
-
         if (relative_extent.block_offset > c.be32toh(agf_header.agf_length)) {
-            std.log.info("extent's block_offset={} is beyond the Allocation Group length={}", .{
+            std.log.debug("extent's block_offset={} is beyond the Allocation Group length={}", .{
                 relative_extent.block_offset,
                 c.be32toh(agf_header.agf_length),
             });
@@ -187,15 +174,16 @@ pub const xfs_parser = struct {
         extent_end: *u64,
         recovered_extents: *std.ArrayList(xfs_extent_t),
     ) !void {
-        std.log.info("tree_checking extent={}", .{extent.*});
         const block_size: u32 = c.be32toh(self.superblock.sb_blocksize);
 
         var btree_block: c.xfs_btree_block = .{};
-        _ = try self.device.pread(std.mem.asBytes(&btree_block), block_offset);
+        const bytes_read = try self.device.pread(std.mem.asBytes(&btree_block), block_offset);
+        if (bytes_read != @sizeOf(c.xfs_btree_block)) {
+            std.log.warn("truncated read of {}, wanted {}", .{ bytes_read, @sizeOf(c.xfs_btree_block) });
+        }
 
         const number_of_records = c.be16toh(btree_block.bb_numrecs);
         if (c.be16toh(btree_block.bb_level) > 0) {
-            std.log.info("tree_checking leaf level={}", .{c.be16toh(btree_block.bb_level)});
             var keys = std.ArrayList(c.xfs_alloc_key_t).init(self.allocator);
             defer keys.deinit();
             var ptrs = std.ArrayList(c.xfs_alloc_ptr_t).init(self.allocator);
@@ -240,45 +228,30 @@ pub const xfs_parser = struct {
             const seek_offset = ag_offset + ptrs.items[right] * block_size;
             return self.tree_check(extent, ag_offset, seek_offset, extent_begin, extent_end, recovered_extents);
         } else {
-            std.log.info("tree_checking leaf level={}", .{c.be16toh(btree_block.bb_level)});
             var recs = std.ArrayList(c.xfs_alloc_rec_t).init(self.allocator);
             defer recs.deinit();
             try recs.resize(number_of_records);
 
-            const read_no = try self.device.pread(
+            _ = try self.device.pread(
                 std.mem.sliceAsBytes(recs.items),
                 block_offset + btree_walk.btree_header_size(c.xfs_alloc_ptr_t),
             );
-
-            std.log.info("read {} bytes", .{read_no});
-
-            for (recs.items) |rec| {
-                std.log.info("rec start={}, count={}", .{
-                    c.be32toh(rec.ar_startblock),
-                    c.be32toh(rec.ar_blockcount),
-                });
-            }
 
             var left_index: u64 = 0;
             var right_index: u64 = @intCast(number_of_records - 1);
             var middle_index: u64 = 0;
 
-            std.log.info("starting matching with left={}, right={}", .{ left_index, right_index });
-
             while (left_index <= right_index) {
-                std.log.info("matching with left_index={x}, right_index={x}", .{ left_index, right_index });
-                std.log.info("and extent_begin={x}, extent_end={x}", .{ extent_begin.*, extent_end.* });
                 middle_index = @divFloor(left_index + right_index, 2);
                 const record_begin: u64 = c.be32toh(recs.items[@intCast(middle_index)].ar_startblock);
                 const record_end: u64 = record_begin + c.be32toh(recs.items[@intCast(middle_index)].ar_blockcount);
-                std.log.info("and record_begin={x}, record_end={x}", .{ record_begin, record_end });
 
                 if (extent_begin.* > record_end) {
                     left_index = middle_index + 1;
                 } else if (extent_end.* < record_begin) {
                     right_index = middle_index - 1;
                 } else {
-                    std.log.info("found overlapping extent {}->{}", .{ record_begin, record_end });
+                    std.log.debug("found overlapping extent {}->{}", .{ record_begin, record_end });
 
                     const target_begin = @max(record_begin, extent_begin.*);
                     const target_end = @min(record_end, extent_end.*);
@@ -287,7 +260,7 @@ pub const xfs_parser = struct {
                         return;
                     }
 
-                    std.log.info("adding result of overlap ({}->{}) to valid extents", .{ target_begin, target_end });
+                    std.log.debug("adding result of overlap ({}->{}) to valid extents", .{ target_begin, target_end });
 
                     const to_be_added: xfs_extent_t = .{
                         .file_offset = extent.file_offset + target_begin - extent_begin.*,
@@ -304,7 +277,7 @@ pub const xfs_parser = struct {
                         return;
                     }
 
-                    std.log.info("continuing to search for extent {}->{}", .{ extent_begin.*, extent_end.* });
+                    std.log.debug("continuing to search for extent {}->{}", .{ extent_begin.*, extent_end.* });
                 }
             }
         }
@@ -314,6 +287,7 @@ pub const xfs_parser = struct {
         const full_inode_size: u16 = c.be16toh(self.superblock.sb_inodesize);
 
         var extent_recovered_from_list = std.ArrayList(xfs_extent_t).init(self.allocator);
+        errdefer extent_recovered_from_list.deinit();
 
         var inode_header: c.xfs_dinode = .{};
         const blocks_per_ag: c.xfs_agblock_t = c.be32toh(self.superblock.sb_agblocks);
@@ -339,8 +313,6 @@ pub const xfs_parser = struct {
             try self.only_within_agf(&extent, ag_index, agf_root, &extent_recovered_from_list);
         }
 
-        std.log.info("extent_recovered_from_list: {any}", .{extent_recovered_from_list.items});
-
         var has_0_offset = false;
         for (extent_recovered_from_list.items) |extent| {
             if (extent.file_offset == 0) {
@@ -348,8 +320,7 @@ pub const xfs_parser = struct {
             }
         }
         if (!has_0_offset) {
-            // return xfs_error.no_0_start_offset;
-            extent_recovered_from_list.clearAndFree();
+            return xfs_error.no_0_start_offset;
         }
 
         return xfs_inode_t.create(
@@ -392,11 +363,16 @@ pub const xfs_parser = struct {
     fn check_superblock_flags(self: *const xfs_parser) !void {
         const sb_version = c.XFS_SB_VERSION_NUMBITS & c.be16toh(self.superblock.sb_versionnum);
         switch (sb_version) {
-            c.XFS_SB_VERSION_1, c.XFS_SB_VERSION_2, c.XFS_SB_VERSION_3, c.XFS_SB_VERSION_4, c.XFS_SB_VERSION_5 => std.log.info("sb_version={d}", .{sb_version}),
+            c.XFS_SB_VERSION_1,
+            c.XFS_SB_VERSION_2,
+            c.XFS_SB_VERSION_3,
+            c.XFS_SB_VERSION_4,
+            c.XFS_SB_VERSION_5,
+            => std.log.debug("sb_version={d}", .{sb_version}),
             else => std.log.err("unknown sb_version={d}", .{sb_version}),
         }
 
-        std.log.info("version_flags:{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}", .{
+        std.log.debug("version_flags:{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}", .{
             if (self.has_version_feature(c.XFS_SB_VERSION_ATTRBIT)) " attr" else "",
             if (self.has_version_feature(c.XFS_SB_VERSION_NLINKBIT)) " nlink" else "",
             if (self.has_version_feature(c.XFS_SB_VERSION_QUOTABIT)) " quota" else "",
@@ -412,7 +388,7 @@ pub const xfs_parser = struct {
         });
 
         if (self.has_version_feature(c.XFS_SB_VERSION_MOREBITSBIT)) {
-            std.log.info("version2_flags:{s}{s}{s}{s}{s}{s}", .{
+            std.log.debug("version2_flags:{s}{s}{s}{s}{s}{s}", .{
                 if (self.has_version2_feature(c.XFS_SB_VERSION2_LAZYSBCOUNTBIT)) " lazysbcount" else "",
                 if (self.has_version2_feature(c.XFS_SB_VERSION2_ATTR2BIT)) " attr2" else "",
                 if (self.has_version2_feature(c.XFS_SB_VERSION2_PARENTBIT)) " parent" else "",
@@ -422,13 +398,13 @@ pub const xfs_parser = struct {
             });
         }
 
-        std.log.info("ro_compat_flags:{s}{s}{s}", .{
+        std.log.debug("ro_compat_flags:{s}{s}{s}", .{
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_RO_COMPAT_FINOBT)) " finobt" else "",
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_RO_COMPAT_RMAPBT)) " rmapbt" else "",
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_RO_COMPAT_REFLINK)) " reflink" else "",
         });
 
-        std.log.info("incompat_flags:{s}{s}{s}", .{
+        std.log.debug("incompat_flags:{s}{s}{s}", .{
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_INCOMPAT_FTYPE)) " ftype" else "",
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_INCOMPAT_SPINODES)) " spinodes" else "",
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_INCOMPAT_META_UUID)) " meta_uuid" else "",

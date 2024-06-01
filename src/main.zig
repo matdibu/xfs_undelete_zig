@@ -42,14 +42,13 @@ pub fn main() !void {
 
     try r.run(&app);
 
-    std.log.info("leaks? {}", .{gpa.detectLeaks()});
+    std.log.info("allocator leaks? {}", .{gpa.detectLeaks()});
 }
 
 fn save_file(entry: *xp.inode_entry) !void {
-    var file_name: [std.mem.page_size:0]u8 = undefined;
+    const max_filename_len: comptime_int = comptime std.fmt.count("{d}", .{@as(u64, std.math.maxInt(u64))});
+    var file_name: [max_filename_len:0]u8 = undefined;
     _ = try std.fmt.bufPrintZ(&file_name, "{d}", .{entry.inode_number});
-
-    std.log.info("starting to undelete file '{s}', size={d}", .{ file_name, entry.get_file_size() });
 
     var bytes_left: usize = entry.get_file_size();
 
@@ -67,16 +66,13 @@ fn save_file(entry: *xp.inode_entry) !void {
     while (bytes_left != 0) {
         entry.get_next_available_offset(&offset, &size);
         bytes_read = 0;
-        std.log.info("buffer len is {d}", .{buffer.len});
         bytes_to_read = @min(size, buffer.len);
         while (bytes_to_read != 0) {
             try entry.get_file_content(&buffer, offset, bytes_to_read, &bytes_read);
-            std.log.info("bytes_left={d}, size={d}, bytes_to_read={d}, bytes_read={d}", .{ bytes_left, size, bytes_to_read, bytes_read });
             bytes_left -= bytes_read;
             size -= bytes_read;
             bytes_to_read = @min(size, buffer.len);
             _ = try file.pwrite(buffer[0..bytes_read], offset);
-            std.log.info("wrote {d} bytes at offset {d}", .{ bytes_read, offset });
         }
     }
 }

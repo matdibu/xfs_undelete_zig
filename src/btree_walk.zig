@@ -60,15 +60,6 @@ pub fn btree_walk(
 
     const seek_offset: u64 = @as(u64, c.be32toh(superblock.sb_blocksize)) * (@as(u64, c.be32toh(superblock.sb_agblocks)) * @as(u64, ag_index) + @as(u64, agi_root));
 
-    std.log.info("btree_walk seek_offset={}", .{seek_offset});
-
-    std.log.info("sb.sb_blocksize={}, sb.sb_agblocks={}, ag_index={}, agi_root={}", .{
-        c.be32toh(superblock.sb_blocksize),
-        c.be32toh(superblock.sb_agblocks),
-        ag_index,
-        agi_root,
-    });
-
     _ = try device.pread(std.mem.asBytes(&block), seek_offset);
 
     if (magic != c.be32toh(block.bb_magic)) {
@@ -135,18 +126,13 @@ fn btree_walk_records(
     _ = block;
 
     const no_of_records = (c.be32toh(superblock.sb_blocksize) - btree_header_size(btree_ptr_t)) / @sizeOf(btree_rec_t);
-    std.log.info("no_of_records={}", .{no_of_records});
 
     // var records = try std.ArrayList(btree_rec_t).initCapacity(allocator, no_of_records);
     var records = std.ArrayList(btree_rec_t).init(allocator);
     try records.resize(no_of_records);
     defer records.deinit();
 
-    std.log.info("records.items.len={}", .{records.items.len});
-
     _ = try device.pread(std.mem.sliceAsBytes(records.items), seek_offset + btree_header_size(btree_ptr_t));
-
-    std.log.info("records.items[0]={}", .{records.items[0]});
 
     // std.log.info("records.items={x}", .{records.items.ptr});
     for (records.items) |record| {

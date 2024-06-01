@@ -19,7 +19,6 @@ pub const inode_entry = struct {
         block_size: u32,
         extents: std.ArrayList(xfs_extent_t),
     ) inode_entry {
-        std.log.info("extents len is {}", .{extents.items.len});
         return inode_entry{
             .device = device,
             .superblock = superblock,
@@ -31,13 +30,9 @@ pub const inode_entry = struct {
     }
     pub fn get_file_size(self: *const inode_entry) usize {
         var result: u64 = 0;
-
-        std.log.info("get_file_size: {any}", .{self.extents.items});
-
         for (self.extents.items) |extent| {
             result += extent.block_count * self.block_size;
         }
-
         return result;
     }
     pub fn get_next_available_offset(self: *inode_entry, offset: *usize, size: *usize) void {
