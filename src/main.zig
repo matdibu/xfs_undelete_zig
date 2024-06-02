@@ -41,7 +41,7 @@ pub fn main() !void {
 
     try r.run(&app);
 
-    std.log.info("allocator leaks? {}", .{gpa.detectLeaks()});
+    std.log.debug("allocator leaks? {}", .{gpa.detectLeaks()});
 }
 
 fn save_file(entry: *const xp.inode_entry) !void {

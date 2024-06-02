@@ -3,6 +3,7 @@ const std = @import("std");
 pub const inode_entry = @import("inode_entry.zig").inode_entry;
 pub const xfs_inode_t = @import("xfs_inode.zig").xfs_inode_t;
 pub const xfs_error = @import("xfs_error.zig").xfs_error;
+pub const xfs_superblock = @import("xfs_superblock.zig").xfs_superblock;
 
 const c = @import("c.zig").c;
 
@@ -23,21 +24,21 @@ pub const xfs_extent_t = struct {
             .state = @truncate(l0 & (~@as(u64, (@as(u64, std.math.maxInt(u64)) >> c.BMBT_EXNTFLAG_BITLEN)))),
         };
     }
-    pub fn is_valid(self: *const xfs_extent_t, superblock: *const c.xfs_dsb) bool {
+    pub fn is_valid(self: *const xfs_extent_t, superblock: *const xfs_superblock) bool {
         if (c.XFS_EXT_UNWRITTEN == self.state) {
             return false;
         }
         if (0 == self.block_count and 0 == self.block_offset and 0 == self.file_offset and 0 == self.state) {
             return false;
         }
-        if (self.get_input_offset(superblock) + self.block_count > c.be64toh(superblock.sb_dblocks)) {
+        if (self.get_input_offset(superblock) + self.block_count > superblock.sb_dblocks) {
             return false;
         }
 
         return true;
     }
 
-    pub fn get_input_offset(self: *const xfs_extent_t, superblock: *const c.xfs_dsb) u64 {
+    pub fn get_input_offset(self: *const xfs_extent_t, superblock: *const xfs_superblock) u64 {
         const ag_index: c.xfs_agnumber_t = @intCast((self.block_offset & ~(@as(u64, std.math.maxInt(u64)) << @intCast(superblock.sb_agblklog))) >> @intCast(superblock.sb_agblklog));
         const ag_relative_offset: c.xfs_fsblock_t = self.block_offset & ~(@as(u64, std.math.maxInt(u64)) << @intCast(superblock.sb_agblklog));
         const blocks_per_ag: c.xfs_filblks_t = c.be32toh(superblock.sb_blocksize);

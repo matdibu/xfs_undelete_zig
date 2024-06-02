@@ -7,21 +7,18 @@ const xfs_extent_t = @import("xfs_extent.zig").xfs_extent_t;
 
 pub const inode_entry = struct {
     device: *std.fs.File,
-    superblock: *const c.xfs_dsb,
     inode_number: u64,
     block_size: u32,
     extents: std.ArrayList(xfs_extent_t),
     iterator: usize,
     pub fn create(
         device: *std.fs.File,
-        superblock: *const c.xfs_dsb,
         inode_number: u64,
         block_size: u32,
         extents: std.ArrayList(xfs_extent_t),
     ) inode_entry {
         return inode_entry{
             .device = device,
-            .superblock = superblock,
             .inode_number = inode_number,
             .block_size = block_size,
             .extents = extents,
