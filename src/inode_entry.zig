@@ -11,6 +11,7 @@ pub const inode_entry = struct {
     block_size: u32,
     extents: std.ArrayList(xfs_extent_t),
     iterator: usize,
+
     pub fn create(
         device: *std.fs.File,
         inode_number: u64,
@@ -25,6 +26,7 @@ pub const inode_entry = struct {
             .iterator = 0,
         };
     }
+
     pub fn get_file_size(self: *const inode_entry) usize {
         var result: u64 = 0;
         for (self.extents.items) |extent| {
@@ -32,16 +34,7 @@ pub const inode_entry = struct {
         }
         return result;
     }
-    pub fn get_next_available_offset(self: *inode_entry, offset: *usize, size: *usize) void {
-        if (self.iterator == self.extents.items.len) {
-            return;
-        }
 
-        offset.* = self.extents.items[self.iterator].file_offset;
-        size.* = self.extents.items[self.iterator].block_count * self.block_size;
-
-        self.iterator += 1;
-    }
     pub fn get_file_content(self: *const inode_entry, buffer: []u8, offset: usize, bytes_to_read: usize, bytes_read: *usize) !void {
         bytes_read.* = 0;
         var bytes_left = bytes_to_read;
