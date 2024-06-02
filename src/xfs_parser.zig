@@ -107,7 +107,7 @@ pub const xfs_parser = struct {
             if (0 != (free_mask & 1)) {
                 if (self.read_inode(ag_index, current_inode, agf_root)) |inode| {
                     defer inode.deinit();
-                    var entry: inode_entry = inode_entry.create(
+                    var entry: inode_entry = inode_entry.init(
                         &self.device,
                         // &self.superblock,
                         inode.inode,

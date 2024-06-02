@@ -12,7 +12,7 @@ pub const inode_entry = struct {
     extents: std.ArrayList(xfs_extent_t),
     iterator: usize,
 
-    pub fn create(
+    pub fn init(
         device: *std.fs.File,
         inode_number: u64,
         block_size: u32,
