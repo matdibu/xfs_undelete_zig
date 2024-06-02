@@ -62,7 +62,6 @@ fn save_file(entry: *const xp.inode_entry) !void {
     var bytes_to_read: usize = undefined;
     var buffer: [std.mem.page_size]u8 = undefined;
 
-    // implementation via entry.extents
     for (entry.extents.items) |extent| {
         offset = extent.block_offset;
         size = extent.block_count;
@@ -76,21 +75,6 @@ fn save_file(entry: *const xp.inode_entry) !void {
             _ = try file.pwrite(buffer[0..bytes_read], offset);
         }
     }
-
-    // implementation via get_next_available_offset
-    //
-    // while (bytes_left != 0) {
-    //     entry.get_next_available_offset(&offset, &size);
-    //     bytes_read = 0;
-    //     bytes_to_read = @min(size, buffer.len);
-    //     while (bytes_to_read != 0) {
-    //         try entry.get_file_content(&buffer, offset, bytes_to_read, &bytes_read);
-    //         bytes_left -= bytes_read;
-    //         size -= bytes_read;
-    //         bytes_to_read = @min(size, buffer.len);
-    //         _ = try file.pwrite(buffer[0..bytes_read], offset);
-    //     }
-    // }
 }
 
 fn xfs_callback(entry: *const xp.inode_entry) void {
@@ -104,7 +88,6 @@ fn run() !void {
     var output_dir = try std.fs.cwd().makeOpenPath(config.output, .{});
     defer output_dir.close();
 
-    // var parser: xp.xfs_parser = .{ .device_path = config.device };
     var parser = xp.xfs_parser.init(allocator);
     parser.device_path = config.device;
     try parser.dump_inodes(xfs_callback);
