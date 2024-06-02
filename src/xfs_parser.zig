@@ -6,9 +6,10 @@ pub const xfs_inode_err = @import("./xfs_inode.zig").xfs_inode_err;
 pub const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
 pub const xfs_error = @import("./xfs_error.zig").xfs_error;
 
-pub const btree_walk = @import("./btree_walk.zig");
-
 const c = @import("./c.zig").c;
+const c_patched = @import("./c.zig");
+
+pub const btree_walk_err = (std.mem.Allocator.Error || std.fs.File.PReadError || xfs_error);
 
 pub const callback_t = fn (*inode_entry) void;
 
@@ -28,20 +29,22 @@ pub const xfs_parser = struct {
         var ag_free_space_header: c.xfs_agf_t = .{};
         var ag_inode_management_header: c.xfs_agi_t = .{};
 
-        const cb: btree_walk.treewalk_callback_t(c.xfs_inobt_rec_t) = .{ .parser = self, .callback = callback };
-
         var ag_index: c.xfs_agnumber_t = 0;
         while (ag_index < c.be32toh(self.superblock.sb_agcount)) : (ag_index += 1) {
-            var offset: u64 = @as(u64, c.be32toh(self.superblock.sb_blocksize)) * @as(u64, c.be32toh(self.superblock.sb_agblocks)) * @as(u64, ag_index) + @as(u64, c.be16toh(self.superblock.sb_sectsize));
+            const block_size: u64 = c.be32toh(self.superblock.sb_blocksize);
+            const ag_blocks: u64 = c.be32toh(self.superblock.sb_agblocks);
+            const sector_size: u64 = c.be16toh(self.superblock.sb_sectsize);
 
-            _ = try self.device.pread(std.mem.asBytes(&ag_free_space_header), offset);
+            // read ag_free_space_header
+            const ag_fsh_offset: u64 = block_size * ag_blocks * ag_index + sector_size;
+            _ = try self.device.pread(std.mem.asBytes(&ag_free_space_header), ag_fsh_offset);
             if (c.XFS_AGF_MAGIC != c.be32toh(ag_free_space_header.agf_magicnum)) {
                 return xfs_error.agf_magic;
             }
 
-            offset += c.be16toh(self.superblock.sb_sectsize);
-
-            _ = try self.device.pread(std.mem.asBytes(&ag_inode_management_header), offset);
+            // read ag_inode_management_header
+            const ag_imh_offset = ag_fsh_offset + sector_size;
+            _ = try self.device.pread(std.mem.asBytes(&ag_inode_management_header), ag_imh_offset);
             if (c.XFS_AGI_MAGIC != c.be32toh(ag_inode_management_header.agi_magicnum)) {
                 return xfs_error.agi_magic;
             }
@@ -50,7 +53,7 @@ pub const xfs_parser = struct {
 
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_RO_COMPAT_FINOBT)) {
                 std.log.info("dumping finobt in ag#{d}", .{ag_index});
-                try btree_walk.btree_walk(
+                try self.btree_walk(
                     c.xfs_inobt_ptr_t,
                     c.xfs_inobt_rec_t,
                     self.allocator,
@@ -60,11 +63,11 @@ pub const xfs_parser = struct {
                     c.be32toh(ag_inode_management_header.agi_free_root),
                     c.XFS_FIBT_CRC_MAGIC,
                     agf_block_number_root,
-                    cb,
+                    callback,
                 );
             } else {
                 std.log.info("dumping inobt in ag#{d}", .{ag_index});
-                try btree_walk.btree_walk(
+                try self.btree_walk(
                     c.xfs_inobt_ptr_t,
                     c.xfs_inobt_rec_t,
                     self.allocator,
@@ -74,13 +77,19 @@ pub const xfs_parser = struct {
                     c.be32toh(ag_inode_management_header.agi_root),
                     c.XFS_IBT_CRC_MAGIC,
                     agf_block_number_root,
-                    cb,
+                    callback,
                 );
             }
         }
     }
 
-    pub fn inode_btree_callback(self: *xfs_parser, ag_index: c.xfs_agnumber_t, inobt_rec: c.xfs_inobt_rec_t, agf_root: u32, cb: *const callback_t) void {
+    pub fn inode_btree_callback(
+        self: *xfs_parser,
+        ag_index: c.xfs_agnumber_t,
+        inobt_rec: c.xfs_inobt_rec_t,
+        agf_root: u32,
+        cb: *const callback_t,
+    ) void {
         var current_inode = c.be32toh(inobt_rec.ir_startino);
         const start_inode = current_inode;
         var free_mask = c.be64toh(inobt_rec.ir_free);
@@ -187,16 +196,16 @@ pub const xfs_parser = struct {
             try keys.resize(number_of_records);
             try ptrs.resize(number_of_records);
 
-            const max_no_of_records = (block_size - btree_walk.btree_header_size(c.xfs_alloc_ptr_t)) / (@sizeOf(c.xfs_alloc_key_t) + @sizeOf(c.xfs_alloc_ptr_t));
+            const max_no_of_records = (block_size - @This().btree_header_size(c.xfs_alloc_ptr_t)) / (@sizeOf(c.xfs_alloc_key_t) + @sizeOf(c.xfs_alloc_ptr_t));
 
-            _ = try self.device.pread(std.mem.sliceAsBytes(keys.items), block_offset + btree_walk.btree_header_size(c.xfs_alloc_ptr_t));
+            _ = try self.device.pread(std.mem.sliceAsBytes(keys.items), block_offset + @This().btree_header_size(c.xfs_alloc_ptr_t));
 
             for (keys.items, 0..) |key, i| {
                 keys.items[i].ar_blockcount = c.be32toh(key.ar_blockcount);
                 keys.items[i].ar_startblock = c.be32toh(key.ar_startblock);
             }
 
-            const ptrs_offset = btree_walk.btree_header_size(c.xfs_alloc_ptr_t) + max_no_of_records * @sizeOf(c.xfs_alloc_key_t);
+            const ptrs_offset = @This().btree_header_size(c.xfs_alloc_ptr_t) + max_no_of_records * @sizeOf(c.xfs_alloc_key_t);
 
             _ = try self.device.pread(std.mem.sliceAsBytes(keys.items), block_offset + ptrs_offset);
 
@@ -229,7 +238,7 @@ pub const xfs_parser = struct {
 
             _ = try self.device.pread(
                 std.mem.sliceAsBytes(recs.items),
-                block_offset + btree_walk.btree_header_size(c.xfs_alloc_ptr_t),
+                block_offset + @This().btree_header_size(c.xfs_alloc_ptr_t),
             );
 
             var left_index: u64 = 0;
@@ -404,5 +413,117 @@ pub const xfs_parser = struct {
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_INCOMPAT_SPINODES)) " spinodes" else "",
             if (self.has_ro_compat_feature(c.XFS_SB_FEAT_INCOMPAT_META_UUID)) " meta_uuid" else "",
         });
+    }
+
+    pub fn btree_header_size(comptime btree_ptr_t: type) usize {
+        return switch (btree_ptr_t) {
+            // TODO(mateidibu): there are other XFS_BTREE_*BLOCK_*LEN macros,
+            // check that they are properly covered
+            c.xfs_alloc_ptr_t => c_patched.XFS_BTREE_SBLOCK_CRC_LEN,
+            else => @compileError("btree_ptr_t does not have a matching XFS_BTREE_*BLOCK_CRC_LEN"),
+        };
+    }
+
+    pub fn btree_walk(
+        self: *xfs_parser,
+        comptime btree_ptr_t: type,
+        comptime btree_rec_t: type,
+        allocator: std.mem.Allocator,
+        device: std.fs.File,
+        superblock: *const c.xfs_dsb,
+        ag_index: c.xfs_agnumber_t,
+        agi_root: btree_ptr_t,
+        magic: u32,
+        agf_block_number_root: u32,
+        cb: *const callback_t,
+    ) btree_walk_err!void {
+        var block: c.xfs_btree_block = .{};
+
+        const seek_offset: u64 = @as(u64, c.be32toh(superblock.sb_blocksize)) * (@as(u64, c.be32toh(superblock.sb_agblocks)) * @as(u64, ag_index) + @as(u64, agi_root));
+
+        _ = try device.pread(std.mem.asBytes(&block), seek_offset);
+
+        if (magic != c.be32toh(block.bb_magic)) {
+            std.log.err("bad btree magic at offset {x}, expected '{s}'/{x}, got '{s}'/{x}", .{
+                seek_offset,
+                std.mem.asBytes(&magic)[0..4],
+                magic,
+                std.mem.asBytes(&block.bb_magic)[0..4],
+                block.bb_magic,
+            });
+            return xfs_error.btree_block_magic;
+        }
+
+        if (c.be32toh(block.bb_level) > 0) {
+            return self.btree_walk_pointers(btree_ptr_t, btree_rec_t, allocator, device, superblock, ag_index, seek_offset, magic, agf_block_number_root, cb);
+        }
+
+        return self.btree_walk_records(btree_ptr_t, btree_rec_t, allocator, device, superblock, ag_index, seek_offset, agf_block_number_root, cb);
+    }
+
+    fn btree_walk_pointers(
+        self: *xfs_parser,
+        comptime btree_ptr_t: type,
+        comptime btree_rec_t: type,
+        allocator: std.mem.Allocator,
+        device: std.fs.File,
+        superblock: *const c.xfs_dsb,
+        ag_index: c.xfs_agnumber_t,
+        seek_offset: u64,
+        magic: u32,
+        agf_block_number_root: u32,
+        cb: *const callback_t,
+    ) btree_walk_err!void {
+        const no_of_pointers = (c.be32toh(superblock.sb_blocksize) - @This().btree_header_size(btree_ptr_t)) / (@sizeOf(btree_ptr_t) * 2);
+
+        // var pointers = try std.ArrayList(btree_ptr_t).initCapacity(allocator, no_of_pointers);
+        var pointers = std.ArrayList(btree_ptr_t).init(allocator);
+        defer pointers.deinit();
+
+        const offset = seek_offset + (@This().btree_header_size(btree_ptr_t) + c.be32toh(superblock.sb_blocksize)) / 2;
+
+        try pointers.resize(no_of_pointers);
+        _ = try device.pread(std.mem.sliceAsBytes(pointers.items), offset);
+
+        for (pointers.items) |pointer| {
+            try self.btree_walk(
+                btree_ptr_t,
+                btree_rec_t,
+                allocator,
+                device,
+                superblock,
+                ag_index,
+                c.be32toh(pointer),
+                magic,
+                agf_block_number_root,
+                cb,
+            );
+        }
+    }
+
+    fn btree_walk_records(
+        self: *xfs_parser,
+        comptime btree_ptr_t: type,
+        comptime btree_rec_t: type,
+        allocator: std.mem.Allocator,
+        device: std.fs.File,
+        superblock: *const c.xfs_dsb,
+        ag_index: c.xfs_agnumber_t,
+        seek_offset: u64,
+        agf_block_number_root: u32,
+        cb: *const callback_t,
+    ) btree_walk_err!void {
+        const block_size = c.be32toh(superblock.sb_blocksize);
+        const no_of_records = (block_size - @This().btree_header_size(btree_ptr_t)) / @sizeOf(btree_rec_t);
+
+        var records = std.ArrayList(btree_rec_t).init(allocator);
+        defer records.deinit();
+
+        try records.resize(no_of_records);
+        _ = try device.pread(std.mem.sliceAsBytes(records.items), seek_offset + @This().btree_header_size(btree_ptr_t));
+
+        for (records.items) |record| {
+            self.inode_btree_callback(ag_index, record, agf_block_number_root, cb);
+        }
     }
 };
