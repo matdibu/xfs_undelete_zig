@@ -1,7 +1,7 @@
 const std = @import("std");
 const cli = @import("zig-cli");
 
-const xp = @import("./xfs_parser.zig");
+const xp = @import("xfs_parser.zig");
 
 var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
 const allocator = gpa.allocator();

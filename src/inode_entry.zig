@@ -2,8 +2,8 @@ const std = @import("std");
 
 const c = @import("c.zig").c;
 
-const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
-const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
+const xfs_inode_t = @import("xfs_inode.zig").xfs_inode_t;
+const xfs_extent_t = @import("xfs_extent.zig").xfs_extent_t;
 
 pub const inode_entry = struct {
     device: *std.fs.File,

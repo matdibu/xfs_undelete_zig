@@ -1,10 +1,10 @@
 const std = @import("std");
 
-pub const inode_entry = @import("./inode_entry.zig").inode_entry;
-pub const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
-pub const xfs_error = @import("./xfs_error.zig").xfs_error;
+pub const inode_entry = @import("inode_entry.zig").inode_entry;
+pub const xfs_inode_t = @import("xfs_inode.zig").xfs_inode_t;
+pub const xfs_error = @import("xfs_error.zig").xfs_error;
 
-const c = @import("./c.zig").c;
+const c = @import("c.zig").c;
 
 pub const xfs_extent_t = struct {
     file_offset: c.xfs_fileoff_t,

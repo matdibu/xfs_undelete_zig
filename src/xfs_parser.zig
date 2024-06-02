@@ -1,13 +1,13 @@
 const std = @import("std");
 
-pub const inode_entry = @import("./inode_entry.zig").inode_entry;
-pub const xfs_inode_t = @import("./xfs_inode.zig").xfs_inode_t;
-pub const xfs_inode_err = @import("./xfs_inode.zig").xfs_inode_err;
-pub const xfs_extent_t = @import("./xfs_extent.zig").xfs_extent_t;
-pub const xfs_error = @import("./xfs_error.zig").xfs_error;
+pub const inode_entry = @import("inode_entry.zig").inode_entry;
+pub const xfs_inode_t = @import("xfs_inode.zig").xfs_inode_t;
+pub const xfs_inode_err = @import("xfs_inode.zig").xfs_inode_err;
+pub const xfs_extent_t = @import("xfs_extent.zig").xfs_extent_t;
+pub const xfs_error = @import("xfs_error.zig").xfs_error;
 
-const c = @import("./c.zig").c;
-const c_patched = @import("./c.zig");
+const c = @import("c.zig").c;
+const c_patched = @import("c.zig");
 
 pub const btree_walk_err = (std.mem.Allocator.Error || std.fs.File.PReadError || xfs_error);
 
@@ -18,6 +18,9 @@ pub const xfs_parser = struct {
     device_path: []const u8 = undefined,
     device: std.fs.File = undefined,
     superblock: c.xfs_dsb = undefined,
+    sb_blocksize: u32 = undefined,
+    sb_agblocks: u32 = undefined,
+    sb_sectsize: u16 = undefined,
 
     pub fn init(allocator: std.mem.Allocator) xfs_parser {
         return .{ .allocator = allocator };
@@ -31,19 +34,15 @@ pub const xfs_parser = struct {
 
         var ag_index: c.xfs_agnumber_t = 0;
         while (ag_index < c.be32toh(self.superblock.sb_agcount)) : (ag_index += 1) {
-            const block_size: u64 = c.be32toh(self.superblock.sb_blocksize);
-            const ag_blocks: u64 = c.be32toh(self.superblock.sb_agblocks);
-            const sector_size: u64 = c.be16toh(self.superblock.sb_sectsize);
-
             // read ag_free_space_header
-            const ag_fsh_offset: u64 = block_size * ag_blocks * ag_index + sector_size;
+            const ag_fsh_offset: u64 = self.sb_blocksize * self.sb_agblocks * ag_index + self.sb_sectsize;
             _ = try self.device.pread(std.mem.asBytes(&ag_free_space_header), ag_fsh_offset);
             if (c.XFS_AGF_MAGIC != c.be32toh(ag_free_space_header.agf_magicnum)) {
                 return xfs_error.agf_magic;
             }
 
             // read ag_inode_management_header
-            const ag_imh_offset = ag_fsh_offset + sector_size;
+            const ag_imh_offset = ag_fsh_offset + self.sb_sectsize;
             _ = try self.device.pread(std.mem.asBytes(&ag_inode_management_header), ag_imh_offset);
             if (c.XFS_AGI_MAGIC != c.be32toh(ag_inode_management_header.agi_magicnum)) {
                 return xfs_error.agi_magic;
@@ -106,12 +105,11 @@ pub const xfs_parser = struct {
             if (0 != (free_mask & 1)) {
                 if (self.read_inode(ag_index, current_inode, agf_root)) |inode| {
                     defer inode.deinit();
-                    const block_size = c.be32toh(self.superblock.sb_blocksize);
                     var entry: inode_entry = inode_entry.create(
                         &self.device,
                         &self.superblock,
                         inode.inode,
-                        block_size,
+                        self.sb_blocksize,
                         inode.extents,
                     );
 
@@ -137,36 +135,151 @@ pub const xfs_parser = struct {
     }
 
     fn only_within_agf(self: *const xfs_parser, extent: *const xfs_extent_t, ag_index: c.xfs_agnumber_t, agf_root: u32, recovered_extents: *std.ArrayList(xfs_extent_t)) !void {
-        const blocks_per_ag = c.be32toh(self.superblock.sb_agblocks);
-        const block_size = c.be32toh(self.superblock.sb_blocksize);
-        const ag_offset = ag_index * blocks_per_ag * block_size;
+        const ag_offset = ag_index * self.sb_agblocks * self.sb_blocksize;
         var agf_header: c.xfs_agf_t = .{};
         _ = try self.device.pread(
             std.mem.asBytes(&agf_header),
-            ag_offset + c.be16toh(self.superblock.sb_sectsize),
+            ag_offset + self.sb_sectsize,
         );
 
         const relative_extent = xfs_extent_t{
             .file_offset = extent.file_offset,
-            .block_offset = extent.block_offset - ag_offset / block_size,
+            .block_offset = extent.block_offset - ag_offset / self.sb_blocksize,
             .block_count = extent.block_count,
             .state = extent.state,
         };
 
-        if (relative_extent.block_offset > c.be32toh(agf_header.agf_length)) {
+        const agf_length = c.be32toh(agf_header.agf_length);
+        if (relative_extent.block_offset > agf_length) {
             std.log.debug("extent's block_offset={} is beyond the Allocation Group length={}", .{
                 relative_extent.block_offset,
-                c.be32toh(agf_header.agf_length),
+                agf_length,
             });
             return;
         }
 
-        const block_offset = ag_offset + agf_root * block_size;
+        const block_offset = ag_offset + agf_root * self.sb_blocksize;
 
         var extent_begin = relative_extent.block_offset;
         var extent_end = extent_begin + relative_extent.block_count;
 
         return self.tree_check(extent, ag_offset, block_offset, &extent_begin, &extent_end, recovered_extents);
+    }
+
+    fn tree_check_leaf(
+        self: *const xfs_parser,
+        extent: *const xfs_extent_t,
+        number_of_records: u16,
+        ag_offset: u64,
+        block_offset: u64,
+        extent_begin: *u64,
+        extent_end: *u64,
+        recovered_extents: *std.ArrayList(xfs_extent_t),
+    ) btree_walk_err!void {
+        var keys = std.ArrayList(c.xfs_alloc_key_t).init(self.allocator);
+        defer keys.deinit();
+
+        var ptrs = std.ArrayList(c.xfs_alloc_ptr_t).init(self.allocator);
+        defer ptrs.deinit();
+
+        try keys.resize(number_of_records);
+        try ptrs.resize(number_of_records);
+
+        const max_no_of_records = (self.sb_blocksize - @This().btree_header_size(c.xfs_alloc_ptr_t)) / (@sizeOf(c.xfs_alloc_key_t) + @sizeOf(c.xfs_alloc_ptr_t));
+
+        _ = try self.device.pread(std.mem.sliceAsBytes(keys.items), block_offset + @This().btree_header_size(c.xfs_alloc_ptr_t));
+
+        const ptrs_offset = @This().btree_header_size(c.xfs_alloc_ptr_t) + max_no_of_records * @sizeOf(c.xfs_alloc_key_t);
+        _ = try self.device.pread(std.mem.sliceAsBytes(ptrs.items), block_offset + ptrs_offset);
+
+        var left: u16 = 0;
+        var right: u16 = number_of_records - 1;
+        var middle: u16 = 0;
+
+        while (left <= right) {
+            middle = (left + right) / 2;
+            if (extent_begin.* > c.be32toh(keys.items[middle].ar_startblock)) {
+                left = middle + 1;
+            } else if (extent_end.* < c.be32toh(keys.items[middle].ar_startblock)) {
+                right = middle - 1;
+            } else {
+                right = middle;
+                break;
+            }
+        }
+
+        const seek_offset = ag_offset + c.be32toh(ptrs.items[right]) * self.sb_blocksize;
+        return self.tree_check(
+            extent,
+            ag_offset,
+            seek_offset,
+            extent_begin,
+            extent_end,
+            recovered_extents,
+        );
+    }
+
+    fn tree_check_recs(
+        self: *const xfs_parser,
+        extent: *const xfs_extent_t,
+        number_of_records: u16,
+        block_offset: u64,
+        extent_begin: *u64,
+        extent_end: *u64,
+        recovered_extents: *std.ArrayList(xfs_extent_t),
+    ) !void {
+        var recs = std.ArrayList(c.xfs_alloc_rec_t).init(self.allocator);
+        defer recs.deinit();
+        try recs.resize(number_of_records);
+
+        _ = try self.device.pread(
+            std.mem.sliceAsBytes(recs.items),
+            block_offset + @This().btree_header_size(c.xfs_alloc_ptr_t),
+        );
+
+        var left_index: u64 = 0;
+        var right_index: u64 = @intCast(number_of_records - 1);
+        var middle_index: u64 = 0;
+
+        while (left_index <= right_index) {
+            middle_index = @divFloor(left_index + right_index, 2);
+            const record_begin: u64 = c.be32toh(recs.items[@intCast(middle_index)].ar_startblock);
+            const record_end: u64 = record_begin + c.be32toh(recs.items[@intCast(middle_index)].ar_blockcount);
+
+            if (extent_begin.* > record_end) {
+                left_index = middle_index + 1;
+            } else if (extent_end.* < record_begin) {
+                right_index = middle_index - 1;
+            } else {
+                std.log.debug("found overlapping extent {}->{}", .{ record_begin, record_end });
+
+                const target_begin = @max(record_begin, extent_begin.*);
+                const target_end = @min(record_end, extent_end.*);
+
+                if (target_end == target_begin) {
+                    return;
+                }
+
+                std.log.debug("adding result of overlap ({}->{}) to valid extents", .{ target_begin, target_end });
+
+                const to_be_added: xfs_extent_t = .{
+                    .file_offset = extent.file_offset + target_begin - extent_begin.*,
+                    .block_offset = target_begin,
+                    .block_count = target_end - target_begin,
+                    .state = 0,
+                };
+
+                try recovered_extents.append(to_be_added);
+
+                extent_begin.* = target_end;
+                right_index += 1;
+                if (extent_begin.* == extent_end.*) {
+                    return;
+                }
+
+                std.log.debug("continuing to search for extent {}->{}", .{ extent_begin.*, extent_end.* });
+            }
+        }
     }
 
     fn tree_check(
@@ -178,8 +291,6 @@ pub const xfs_parser = struct {
         extent_end: *u64,
         recovered_extents: *std.ArrayList(xfs_extent_t),
     ) !void {
-        const block_size: u32 = c.be32toh(self.superblock.sb_blocksize);
-
         var btree_block: c.xfs_btree_block = .{};
         const bytes_read = try self.device.pread(std.mem.asBytes(&btree_block), block_offset);
         if (bytes_read != @sizeOf(c.xfs_btree_block)) {
@@ -188,102 +299,24 @@ pub const xfs_parser = struct {
 
         const number_of_records = c.be16toh(btree_block.bb_numrecs);
         if (c.be16toh(btree_block.bb_level) > 0) {
-            var keys = std.ArrayList(c.xfs_alloc_key_t).init(self.allocator);
-            defer keys.deinit();
-            var ptrs = std.ArrayList(c.xfs_alloc_ptr_t).init(self.allocator);
-            defer ptrs.deinit();
-
-            try keys.resize(number_of_records);
-            try ptrs.resize(number_of_records);
-
-            const max_no_of_records = (block_size - @This().btree_header_size(c.xfs_alloc_ptr_t)) / (@sizeOf(c.xfs_alloc_key_t) + @sizeOf(c.xfs_alloc_ptr_t));
-
-            _ = try self.device.pread(std.mem.sliceAsBytes(keys.items), block_offset + @This().btree_header_size(c.xfs_alloc_ptr_t));
-
-            for (keys.items, 0..) |key, i| {
-                keys.items[i].ar_blockcount = c.be32toh(key.ar_blockcount);
-                keys.items[i].ar_startblock = c.be32toh(key.ar_startblock);
-            }
-
-            const ptrs_offset = @This().btree_header_size(c.xfs_alloc_ptr_t) + max_no_of_records * @sizeOf(c.xfs_alloc_key_t);
-
-            _ = try self.device.pread(std.mem.sliceAsBytes(keys.items), block_offset + ptrs_offset);
-
-            for (ptrs.items, 0..) |ptr, i| {
-                ptrs.items[i] = c.be32toh(ptr);
-            }
-
-            var left: u16 = 0;
-            var right: u16 = number_of_records - 1;
-            var middle: u16 = 0;
-
-            while (left <= right) {
-                middle = (left + right) / 2;
-                if (extent_begin.* > keys.items[middle].ar_startblock) {
-                    left = middle + 1;
-                } else if (extent_end.* < keys.items[middle].ar_startblock) {
-                    right = middle - 1;
-                } else {
-                    right = middle;
-                    break;
-                }
-            }
-
-            const seek_offset = ag_offset + ptrs.items[right] * block_size;
-            return self.tree_check(extent, ag_offset, seek_offset, extent_begin, extent_end, recovered_extents);
-        } else {
-            var recs = std.ArrayList(c.xfs_alloc_rec_t).init(self.allocator);
-            defer recs.deinit();
-            try recs.resize(number_of_records);
-
-            _ = try self.device.pread(
-                std.mem.sliceAsBytes(recs.items),
-                block_offset + @This().btree_header_size(c.xfs_alloc_ptr_t),
+            return self.tree_check_leaf(
+                extent,
+                number_of_records,
+                ag_offset,
+                block_offset,
+                extent_begin,
+                extent_end,
+                recovered_extents,
             );
-
-            var left_index: u64 = 0;
-            var right_index: u64 = @intCast(number_of_records - 1);
-            var middle_index: u64 = 0;
-
-            while (left_index <= right_index) {
-                middle_index = @divFloor(left_index + right_index, 2);
-                const record_begin: u64 = c.be32toh(recs.items[@intCast(middle_index)].ar_startblock);
-                const record_end: u64 = record_begin + c.be32toh(recs.items[@intCast(middle_index)].ar_blockcount);
-
-                if (extent_begin.* > record_end) {
-                    left_index = middle_index + 1;
-                } else if (extent_end.* < record_begin) {
-                    right_index = middle_index - 1;
-                } else {
-                    std.log.debug("found overlapping extent {}->{}", .{ record_begin, record_end });
-
-                    const target_begin = @max(record_begin, extent_begin.*);
-                    const target_end = @min(record_end, extent_end.*);
-
-                    if (target_end == target_begin) {
-                        return;
-                    }
-
-                    std.log.debug("adding result of overlap ({}->{}) to valid extents", .{ target_begin, target_end });
-
-                    const to_be_added: xfs_extent_t = .{
-                        .file_offset = extent.file_offset + target_begin - extent_begin.*,
-                        .block_offset = target_begin,
-                        .block_count = target_end - target_begin,
-                        .state = 0,
-                    };
-
-                    try recovered_extents.append(to_be_added);
-
-                    extent_begin.* = target_end;
-                    right_index += 1;
-                    if (extent_begin.* == extent_end.*) {
-                        return;
-                    }
-
-                    std.log.debug("continuing to search for extent {}->{}", .{ extent_begin.*, extent_end.* });
-                }
-            }
+        } else {
+            return self.tree_check_recs(
+                extent,
+                number_of_records,
+                block_offset,
+                extent_begin,
+                extent_end,
+                recovered_extents,
+            );
         }
     }
 
@@ -294,10 +327,8 @@ pub const xfs_parser = struct {
         errdefer extent_recovered_from_list.deinit();
 
         var inode_header: c.xfs_dinode = .{};
-        const blocks_per_ag: c.xfs_agblock_t = c.be32toh(self.superblock.sb_agblocks);
-        const block_size: u32 = c.be32toh(self.superblock.sb_blocksize);
 
-        const ag_offset: u64 = ag_index * blocks_per_ag * block_size;
+        const ag_offset: u64 = ag_index * self.sb_agblocks * self.sb_blocksize;
 
         const seek_offset: u64 = @as(u64, ag_offset) + @as(u64, current_inode) * @as(u64, full_inode_size);
 
@@ -340,9 +371,14 @@ pub const xfs_parser = struct {
             return xfs_error.sb_magic;
         }
 
-        std.log.info("sb.sb_blocksize={}, sb.sb_agblocks={}", .{
-            c.be32toh(self.superblock.sb_blocksize),
-            c.be32toh(self.superblock.sb_agblocks),
+        self.sb_blocksize = c.be32toh(self.superblock.sb_blocksize);
+        self.sb_agblocks = c.be32toh(self.superblock.sb_agblocks);
+        self.sb_sectsize = c.be16toh(self.superblock.sb_sectsize);
+
+        std.log.info("sb_blocksize={}, sb_agblocks={}, sb_sectsize={}", .{
+            self.sb_blocksize,
+            self.sb_agblocks,
+            self.sb_sectsize,
         });
 
         try self.check_superblock_flags();
@@ -439,7 +475,7 @@ pub const xfs_parser = struct {
     ) btree_walk_err!void {
         var block: c.xfs_btree_block = .{};
 
-        const seek_offset: u64 = @as(u64, c.be32toh(superblock.sb_blocksize)) * (@as(u64, c.be32toh(superblock.sb_agblocks)) * @as(u64, ag_index) + @as(u64, agi_root));
+        const seek_offset: u64 = self.sb_blocksize * (self.sb_agblocks * ag_index + agi_root);
 
         _ = try device.pread(std.mem.asBytes(&block), seek_offset);
 
@@ -455,10 +491,30 @@ pub const xfs_parser = struct {
         }
 
         if (c.be32toh(block.bb_level) > 0) {
-            return self.btree_walk_pointers(btree_ptr_t, btree_rec_t, allocator, device, superblock, ag_index, seek_offset, magic, agf_block_number_root, cb);
+            return self.btree_walk_pointers(
+                btree_ptr_t,
+                btree_rec_t,
+                allocator,
+                device,
+                superblock,
+                ag_index,
+                seek_offset,
+                magic,
+                agf_block_number_root,
+                cb,
+            );
         }
 
-        return self.btree_walk_records(btree_ptr_t, btree_rec_t, allocator, device, superblock, ag_index, seek_offset, agf_block_number_root, cb);
+        return self.btree_walk_records(
+            btree_ptr_t,
+            btree_rec_t,
+            allocator,
+            device,
+            ag_index,
+            seek_offset,
+            agf_block_number_root,
+            cb,
+        );
     }
 
     fn btree_walk_pointers(
@@ -474,13 +530,13 @@ pub const xfs_parser = struct {
         agf_block_number_root: u32,
         cb: *const callback_t,
     ) btree_walk_err!void {
-        const no_of_pointers = (c.be32toh(superblock.sb_blocksize) - @This().btree_header_size(btree_ptr_t)) / (@sizeOf(btree_ptr_t) * 2);
+        const no_of_pointers = (self.sb_blocksize - @This().btree_header_size(btree_ptr_t)) / (@sizeOf(btree_ptr_t) * 2);
 
         // var pointers = try std.ArrayList(btree_ptr_t).initCapacity(allocator, no_of_pointers);
         var pointers = std.ArrayList(btree_ptr_t).init(allocator);
         defer pointers.deinit();
 
-        const offset = seek_offset + (@This().btree_header_size(btree_ptr_t) + c.be32toh(superblock.sb_blocksize)) / 2;
+        const offset = seek_offset + (@This().btree_header_size(btree_ptr_t) + self.sb_blocksize) / 2;
 
         try pointers.resize(no_of_pointers);
         _ = try device.pread(std.mem.sliceAsBytes(pointers.items), offset);
@@ -507,14 +563,12 @@ pub const xfs_parser = struct {
         comptime btree_rec_t: type,
         allocator: std.mem.Allocator,
         device: std.fs.File,
-        superblock: *const c.xfs_dsb,
         ag_index: c.xfs_agnumber_t,
         seek_offset: u64,
         agf_block_number_root: u32,
         cb: *const callback_t,
     ) btree_walk_err!void {
-        const block_size = c.be32toh(superblock.sb_blocksize);
-        const no_of_records = (block_size - @This().btree_header_size(btree_ptr_t)) / @sizeOf(btree_rec_t);
+        const no_of_records = (self.sb_blocksize - @This().btree_header_size(btree_ptr_t)) / @sizeOf(btree_rec_t);
 
         var records = std.ArrayList(btree_rec_t).init(allocator);
         defer records.deinit();
