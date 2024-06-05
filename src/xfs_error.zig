@@ -1,5 +1,4 @@
 pub const xfs_error = error{
-    no_device,
     sb_magic,
     sb_version,
     agf_magic,

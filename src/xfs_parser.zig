@@ -17,13 +17,17 @@ pub const callback_t = fn (*inode_entry) void;
 
 pub const xfs_parser = struct {
     allocator: std.mem.Allocator,
-    device_path: []const u8 = undefined,
+    device_path: []const u8,
     device: std.fs.File = undefined,
     superblock: xfs_superblock = undefined,
 
-    pub fn init(allocator: std.mem.Allocator) xfs_parser {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        device_path: []const u8,
+    ) xfs_parser {
         return .{
             .allocator = allocator,
+            .device_path = device_path,
         };
     }
 
@@ -154,6 +158,7 @@ pub const xfs_parser = struct {
             .file_offset = extent.file_offset,
             .block_offset = extent.block_offset - ag_offset / self.superblock.sb_blocksize,
             .block_count = extent.block_count,
+            .block_size = self.superblock.sb_blocksize,
             .state = extent.state,
         };
 
@@ -284,6 +289,7 @@ pub const xfs_parser = struct {
                     .file_offset = extent.file_offset + target_begin - extent_begin.*,
                     .block_offset = target_begin,
                     .block_count = target_end - target_begin,
+                    .block_size = self.superblock.sb_blocksize,
                     .state = 0,
                 };
 
@@ -350,20 +356,24 @@ pub const xfs_parser = struct {
 
         _ = try self.device.pread(std.mem.asBytes(&inode_header), seek_offset);
 
-        const number_of_extents = (full_inode_size - @sizeOf(c.xfs_dinode)) / @sizeOf(c.xfs_bmbt_rec_t);
         var packed_extents = std.ArrayList(c.xfs_bmbt_rec_t).init(self.allocator);
         defer packed_extents.deinit();
+
+        const number_of_extents = (full_inode_size - @sizeOf(c.xfs_dinode)) / @sizeOf(c.xfs_bmbt_rec_t);
         try packed_extents.resize(number_of_extents);
+
         _ = try self.device.pread(
             std.mem.sliceAsBytes(packed_extents.items),
             seek_offset + @sizeOf(c.xfs_dinode),
         );
 
         for (packed_extents.items) |packed_extent| {
-            const extent = xfs_extent_t.create(&packed_extent);
-            if (!extent.is_valid(&self.superblock)) {
+            const extent = xfs_extent_t.create(&packed_extent, self.superblock.sb_blocksize);
+            extent.check(&self.superblock) catch {
+                // too verbose
+                // std.log.debug("packed_extent skipped: {}", .{err});
                 continue;
-            }
+            };
             try self.only_within_agf(&extent, ag_index, agf_root, &extent_recovered_from_list);
         }
 
