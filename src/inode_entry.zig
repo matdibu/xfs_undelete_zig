@@ -27,6 +27,10 @@ pub const inode_entry = struct {
         };
     }
 
+    pub fn deinit(self: *inode_entry) void {
+        self.extents.deinit();
+    }
+
     pub fn get_file_size(self: *const inode_entry) usize {
         var result: u64 = 0;
         for (self.extents.items) |extent| {
@@ -37,11 +41,12 @@ pub const inode_entry = struct {
 
     pub fn get_file_content(self: *const inode_entry, buffer: []u8, offset: usize, bytes_to_read: usize, bytes_read: *usize) !void {
         bytes_read.* = 0;
+
         var bytes_left = bytes_to_read;
         var current_offset = offset;
 
         for (self.extents.items) |extent| {
-            const end_file_offset: u64 = extent.file_offset + extent.block_count * self.block_size;
+            const end_file_offset = extent.file_offset + extent.block_count * self.block_size;
             if (current_offset >= extent.file_offset and current_offset <= end_file_offset) {
                 const start_in_bytes = extent.block_offset * self.block_size;
                 const target_offset = start_in_bytes + current_offset - extent.file_offset;
