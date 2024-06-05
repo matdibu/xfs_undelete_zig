@@ -44,7 +44,7 @@ pub fn main() !void {
     std.log.debug("allocator leaks? {}", .{gpa.detectLeaks()});
 }
 
-fn save_file(entry: *const xp.inode_entry) !void {
+fn saveInodeEntry(entry: *const xp.inode_entry) !void {
     const max_filename_len: comptime_int = comptime std.fmt.count("{d}", .{@as(u64, std.math.maxInt(u64))});
     var file_name: [max_filename_len:0]u8 = undefined;
     _ = try std.fmt.bufPrintZ(&file_name, "{d}", .{entry.inode_number});
@@ -77,18 +77,14 @@ fn save_file(entry: *const xp.inode_entry) !void {
     }
 }
 
-fn xfs_callback(entry: *const xp.inode_entry) void {
+fn xfsCallback(entry: *const xp.inode_entry) void {
     std.log.info("inode={d}, file_size={d}", .{ entry.inode_number, entry.get_file_size() });
-    save_file(entry) catch |err| std.log.warn("erroring during save_file: {}", .{err});
+    saveInodeEntry(entry) catch |err| std.log.warn("erroring during save_file: {}", .{err});
 }
 
 fn run() !void {
     std.log.debug("started xfs_undelete, device={s}, output={s}", .{ config.device, config.output });
 
-    var output_dir = try std.fs.cwd().makeOpenPath(config.output, .{});
-    defer output_dir.close();
-
-    var parser = xp.xfs_parser.init(allocator);
-    parser.device_path = config.device;
-    try parser.dump_inodes(xfs_callback);
+    var parser = xp.xfs_parser.init(allocator, config.device);
+    try parser.dump_inodes(xfsCallback);
 }
