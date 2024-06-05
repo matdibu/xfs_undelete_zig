@@ -25,7 +25,7 @@ pub const xfs_inode_t = struct {
         if (c.XFS_DINODE_MAGIC != c.be16toh(inode_header.di_magic)) {
             return xfs_inode_err.bad_magic;
         }
-        if (0 != inode_header.di_mode) {
+        if (0 != c.be16toh(inode_header.di_mode)) {
             return xfs_inode_err.non_zero_mode;
         }
         if (3 != inode_header.di_version) {
@@ -34,7 +34,7 @@ pub const xfs_inode_t = struct {
         if (c.XFS_DINODE_FMT_EXTENTS != inode_header.di_format) {
             return xfs_inode_err.format_is_not_extents;
         }
-        if (0 != inode_header.di_nlink) {
+        if (0 != c.be32toh(inode_header.di_nlink)) {
             return xfs_inode_err.non_zero_nlink;
         }
 
