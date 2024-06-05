@@ -11,6 +11,8 @@ var config = struct {
     output: []const u8 = undefined,
 }{};
 
+var device: std.fs.File = undefined;
+
 pub fn main() !void {
     var r = try cli.AppRunner.init(allocator);
 
@@ -49,31 +51,27 @@ fn saveInodeEntry(entry: *const xp.inode_entry) !void {
     var file_name: [max_filename_len:0]u8 = undefined;
     _ = try std.fmt.bufPrintZ(&file_name, "{d}", .{entry.inode_number});
 
-    var bytes_left: usize = entry.get_file_size();
-
-    var dir = try std.fs.cwd().openDir(config.output, .{});
+    var dir = try std.fs.cwd().makeOpenPath(config.output, .{});
     const file = try dir.createFileZ(&file_name, .{});
     defer file.close();
     defer dir.close();
 
-    var offset: usize = undefined;
-    var size: usize = undefined;
-    var bytes_read: usize = undefined;
-    var bytes_to_read: usize = undefined;
-    var buffer: [std.mem.page_size]u8 = undefined;
-
     for (entry.extents.items) |extent| {
-        offset = extent.block_offset;
-        size = extent.block_count;
-        bytes_read = 0;
-        bytes_to_read = @min(size, buffer.len);
-        while (bytes_to_read != 0) {
-            try entry.get_file_content(&buffer, offset, bytes_to_read, &bytes_read);
-            bytes_left -= bytes_read;
-            size -= bytes_read;
-            bytes_to_read = @min(size, buffer.len);
-            _ = try file.pwrite(buffer[0..bytes_read], offset);
-        }
+        std.log.debug("extent={}", .{extent});
+        const bytecount = try std.posix.copy_file_range(
+            device.handle,
+            extent.block_offset * extent.block_size,
+            file.handle,
+            extent.file_offset,
+            extent.block_count * extent.block_size,
+            0,
+        );
+        std.log.debug("copied {d} bytes from {s} to {s}/{s}", .{
+            bytecount,
+            config.device,
+            config.output,
+            file_name,
+        });
     }
 }
 
@@ -84,6 +82,9 @@ fn xfsCallback(entry: *const xp.inode_entry) void {
 
 fn run() !void {
     std.log.debug("started xfs_undelete, device={s}, output={s}", .{ config.device, config.output });
+
+    device = try std.fs.cwd().openFile(config.device, .{ .mode = .read_only });
+    defer device.close();
 
     var parser = xp.xfs_parser.init(allocator, config.device);
     try parser.dump_inodes(xfsCallback);
