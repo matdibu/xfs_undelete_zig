@@ -13,6 +13,8 @@ var config = struct {
 
 var device: std.fs.File = undefined;
 
+var block_size: u64 = undefined;
+
 pub fn main() !void {
     var r = try cli.AppRunner.init(allocator);
 
@@ -60,10 +62,10 @@ fn saveInodeEntry(entry: *const xp.inode_entry) !void {
         std.log.debug("extent={}", .{extent});
         const bytecount = try std.posix.copy_file_range(
             device.handle,
-            extent.block_offset * extent.block_size,
+            extent.block_offset * block_size,
             file.handle,
             extent.file_offset,
-            extent.block_count * extent.block_size,
+            extent.block_count * block_size,
             0,
         );
         std.log.debug("copied {d} bytes from {s} to {s}/{s}", .{
@@ -76,7 +78,11 @@ fn saveInodeEntry(entry: *const xp.inode_entry) !void {
 }
 
 fn xfsCallback(entry: *const xp.inode_entry) void {
-    std.log.info("inode={d}, file_size={d}", .{ entry.inode_number, entry.get_file_size() });
+    var file_size: u64 = 0;
+    for (entry.extents.items) |extent| {
+        file_size += extent.block_count * block_size;
+    }
+    std.log.info("inode={d}, file_size={d}", .{ entry.inode_number, file_size });
     saveInodeEntry(entry) catch |err| std.log.warn("erroring during save_file: {}", .{err});
 }
 
@@ -86,6 +92,9 @@ fn run() !void {
     device = try std.fs.cwd().openFile(config.device, .{ .mode = .read_only });
     defer device.close();
 
-    var parser = xp.xfs_parser.init(allocator, config.device);
+    var parser = try xp.xfs_parser.init(allocator, config.device);
+
+    block_size = try parser.get_blocksize();
+
     try parser.dump_inodes(xfsCallback);
 }

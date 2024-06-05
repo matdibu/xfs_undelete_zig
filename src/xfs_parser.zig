@@ -17,18 +17,27 @@ pub const callback_t = fn (*inode_entry) void;
 
 pub const xfs_parser = struct {
     allocator: std.mem.Allocator,
-    device_path: []const u8,
-    device: std.fs.File = undefined,
+    device: std.fs.File,
     superblock: xfs_superblock = undefined,
 
     pub fn init(
         allocator: std.mem.Allocator,
         device_path: []const u8,
-    ) xfs_parser {
+    ) !xfs_parser {
         return .{
             .allocator = allocator,
-            .device_path = device_path,
+            .device = try std.fs.cwd().openFile(device_path, .{ .mode = .read_only, .lock = .exclusive }),
         };
+    }
+
+    pub fn deinit(self: *xfs_parser) void {
+        self.device.close();
+    }
+
+    pub fn get_blocksize(self: *xfs_parser) !u64 {
+        try self.read_superblock();
+
+        return self.superblock.sb_blocksize;
     }
 
     pub fn dump_inodes(self: *xfs_parser, callback: *const callback_t) !void {
@@ -111,13 +120,7 @@ pub const xfs_parser = struct {
             if (0 != (free_mask & 1)) {
                 if (self.read_inode(ag_index, current_inode, agf_root)) |inode| {
                     defer inode.deinit();
-                    var entry: inode_entry = inode_entry.init(
-                        &self.device,
-                        // &self.superblock,
-                        inode.inode,
-                        self.superblock.sb_blocksize,
-                        inode.extents,
-                    );
+                    var entry: inode_entry = inode_entry.init(inode);
 
                     cb(&entry);
                 } else |err| switch (err) {
@@ -394,8 +397,6 @@ pub const xfs_parser = struct {
     }
 
     fn read_superblock(self: *xfs_parser) !void {
-        self.device = try std.fs.cwd().openFile(self.device_path, .{ .mode = .read_only, .lock = .exclusive });
-
         var dsb: c.xfs_dsb = undefined;
         _ = try self.device.pread(std.mem.asBytes(&dsb), 0);
 
