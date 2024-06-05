@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 set -e
 
@@ -10,13 +10,15 @@ dd if=/dev/zero of="${DEVICE_IMG}" bs=4M count=128
 mkfs.xfs "${DEVICE_IMG}" -f
 
 mkdir -p "${MOUNT_DIR}"
-MOUNT_DIR="$(realpath ${MOUNT_DIR})"
+MOUNT_DIR=$(realpath "${MOUNT_DIR}")
 
 mkdir -p "${UNDELETED_DIR}"
-UNDELETED_DIR="$(realpath ${UNDELETED_DIR})"
+UNDELETED_DIR=$(realpath "${UNDELETED_DIR}")
 
 sudo mount "${DEVICE_IMG}" "${MOUNT_DIR}" -o user
-sudo chown -R "$(id -un)":"$(id -gn)" "${MOUNT_DIR}"
+user=$(id -un)
+group=$(id -gn)
+sudo chown -R "${user}":"${group}" "${MOUNT_DIR}"
 python3 create_files.py
 sudo umount -R "${MOUNT_DIR}"
 
@@ -30,4 +32,4 @@ zig build run -- --device "${DEVICE_IMG}" --output "${UNDELETED_DIR}"
 
 # rm -f "${DEVICE_IMG}"
 
-sudo chown -R "$(id -un)":"$(id -gn)" "${UNDELETED_DIR}"
+sudo chown -R "${user}":"${group}" "${UNDELETED_DIR}"
