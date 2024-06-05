@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     systems.url = "github:nix-systems/default";
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
@@ -29,8 +29,6 @@
       url = "github:hercules-ci/gitignore.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    langref.url = "https://raw.githubusercontent.com/ziglang/zig/0fb2015fd3422fc1df364995f9782dfe7255eccd/doc/langref.html.in";
-    langref.flake = false;
   };
 
   outputs =
@@ -41,7 +39,6 @@
       zls-flake,
       treefmt-nix,
       gitignore,
-      langref,
       systems,
       ...
     }@inputs:
@@ -61,6 +58,7 @@
 
       # for `nix build`
       packages = eachSystem (pkgs: let zig = inputs.zig-overlay.packages.${pkgs.system}.master; in {
+        default = self.packages.${pkgs.system}.xfs_undelete;
         "xfs_undelete" = pkgs.stdenvNoCC.mkDerivation {
           name = "xfs_undelete";
           version = "master";
@@ -71,24 +69,23 @@
           dontConfigure = true;
           dontInstall = true;
           doCheck = true;
-          inherit langref;
           patchPhase = ''
-            echo "replacing /nix/store/1s5mym5ar49hwqmxn9baasyw0kbckgmf-xfsprogs-6.8.0-dev/ with ${pkgs.libxfs.dev}/"
             substituteInPlace build.zig \
                 --replace-fail "/nix/store/1s5mym5ar49hwqmxn9baasyw0kbckgmf-xfsprogs-6.8.0-dev/" \
                 "${pkgs.libxfs.dev}/"
 
-            echo "replacing /nix/store/sw3a1cypmpgh8gvlhhxby0wl9f80wg53-util-linux-minimal-2.40.1-dev/ with ${pkgs.libuuid.dev}/"
             substituteInPlace build.zig \
                 --replace-fail "/nix/store/sw3a1cypmpgh8gvlhhxby0wl9f80wg53-util-linux-minimal-2.40.1-dev/" \
                 "${pkgs.libuuid.dev}/"
           '';
           buildPhase = ''
             mkdir -p .cache
-            ln -s ${pkgs.callPackage ./deps.nix { inherit zig; }} .cache/p
-            zig version
-            zig zen
+            ln -s \
+                ${pkgs.callPackage ./deps.nix { inherit zig; }} \
+                .cache/p
             zig build \
+                --verbose \
+                -freference-trace \
                 --prefix $out \
                 --cache-dir $(pwd)/.zig-cache \
                 --global-cache-dir $(pwd)/.cache \
@@ -96,6 +93,7 @@
           '';
           checkPhase = ''
             zig build test \
+                -freference-trace \
                 --cache-dir $(pwd)/.zig-cache \
                 --global-cache-dir $(pwd)/.cache \
                 -Dcpu=baseline
