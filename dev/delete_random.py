@@ -3,7 +3,7 @@
 from os import listdir
 from random import shuffle
 
-from Path import unlink
+from pathlib import Path
 
 if __name__ == "__main__":
     target_dir = "mount"
@@ -11,4 +11,4 @@ if __name__ == "__main__":
     shuffle(files)
     for file in files[::2]:
         path = target_dir + "/" + file
-        unlink(path)
+        Path.unlink(path)
