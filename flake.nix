@@ -1,11 +1,19 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    systems.url = "github:nix-systems/default";
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    flake-utils = {
+      url = "github:numtide/flake-utils";
+      inputs.systems.follows = "systems";
+    };
     zig = {
       url = "github:mitchellh/zig-overlay";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        flake-compat.follows = "flake-compat";
         flake-utils.follows = "flake-utils";
       };
     };
@@ -17,16 +25,6 @@
         flake-utils.follows = "flake-utils";
       };
     };
-    treefmt-nix = {
-      url = "github:numtide/treefmt-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    flake-compat.url = "github:edolstra/flake-compat";
-    flake-utils = {
-      url = "github:numtide/flake-utils";
-      inputs.systems.follows = "systems";
-    };
-    systems.url = "github:nix-systems/default";
   };
 
   outputs =
@@ -56,14 +54,13 @@
       devShells = eachSystem (pkgs: {
         default = pkgs.mkShellNoCC {
           packages = with pkgs; [
+            # build
             zig.packages.${pkgs.system}.master
-            zls.packages.${pkgs.system}.zls
-            spdlog.dev
-            pkg-config
             libuuid.dev
-            libxfs
-            util-linux
-            util-linux.dev
+            libxfs.dev
+
+            # dev
+            zls.packages.${pkgs.system}.zls
             python3
             ruff-lsp
           ];

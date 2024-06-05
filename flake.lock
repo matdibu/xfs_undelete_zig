@@ -1,6 +1,7 @@
 {
   "nodes": {
     "flake-compat": {
+      "flake": false,
       "locked": {
         "lastModified": 1696426674,
         "narHash": "sha256-kvjfFW7WAETZlt09AgDn1MrtKzP7t90Vf7vypd3OL1U=",
@@ -86,7 +87,6 @@
     },
     "root": {
       "inputs": {
-        "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
         "systems": "systems",
@@ -132,9 +132,7 @@
     },
     "zig": {
       "inputs": {
-        "flake-compat": [
-          "flake-compat"
-        ],
+        "flake-compat": "flake-compat",
         "flake-utils": [
           "flake-utils"
         ],
