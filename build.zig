@@ -9,15 +9,20 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
+        .linkage = .dynamic,
     });
 
-    const zigcli_dep = b.dependency("zig-cli", .{ .target = target });
+    xfs_undelete.linkLibC();
+
+    const zigcli_dep = b.dependency("zig-cli", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const zigcli_mod = zigcli_dep.module("zig-cli");
     xfs_undelete.root_module.addImport("zig-cli", zigcli_mod);
 
     xfs_undelete.addSystemIncludePath(.{
-        .cwd_relative = "/nix/store/23v80anf3q5zip8ldlps7hzijnj0gx8w-xfsprogs-6.6.0-dev/include",
+        .cwd_relative = "/nix/store/1s5mym5ar49hwqmxn9baasyw0kbckgmf-xfsprogs-6.8.0-dev/include",
     });
 
     xfs_undelete.linkSystemLibrary("uuid");
@@ -25,7 +30,7 @@ pub fn build(b: *std.Build) void {
     // "pkg-config uuid" returns the "include/uuid" subdir,
     // but xfsprogs-dev wants to include "uuid/uuid.h"
     xfs_undelete.addSystemIncludePath(.{
-        .cwd_relative = "/nix/store/h45bgvgr7ljv8qx5jmrd9vw1ll7df29l-util-linux-minimal-2.39.3-dev/include",
+        .cwd_relative = "/nix/store/sw3a1cypmpgh8gvlhhxby0wl9f80wg53-util-linux-minimal-2.40.1-dev/include",
     });
 
     b.installArtifact(xfs_undelete);

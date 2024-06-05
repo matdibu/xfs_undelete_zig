@@ -39,7 +39,27 @@
     "gitignore": {
       "inputs": {
         "nixpkgs": [
-          "zls",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1709087332,
+        "narHash": "sha256-HG2cCnktfHsKV0s4XW83gU3F57gaTljL9KNSuG6bnQs=",
+        "owner": "hercules-ci",
+        "repo": "gitignore.nix",
+        "rev": "637db329424fd7e46cf4185293b9cc8c88c95394",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hercules-ci",
+        "repo": "gitignore.nix",
+        "type": "github"
+      }
+    },
+    "gitignore_2": {
+      "inputs": {
+        "nixpkgs": [
+          "zls-flake",
           "nixpkgs"
         ]
       },
@@ -69,18 +89,30 @@
         "url": "https://raw.githubusercontent.com/ziglang/zig/0fb2015fd3422fc1df364995f9782dfe7255eccd/doc/langref.html.in"
       }
     },
+    "langref_2": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-O6p2tiKD8ZMhSX+DeA/o5hhAvcPkU2J9lFys/r11peY=",
+        "type": "file",
+        "url": "https://raw.githubusercontent.com/ziglang/zig/0fb2015fd3422fc1df364995f9782dfe7255eccd/doc/langref.html.in"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://raw.githubusercontent.com/ziglang/zig/0fb2015fd3422fc1df364995f9782dfe7255eccd/doc/langref.html.in"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1717399147,
-        "narHash": "sha256-eCWaE/q1VItpFAxxLVt171MdtDcjEnwi6QB/yuF73JU=",
+        "lastModified": 1717281328,
+        "narHash": "sha256-evZPzpf59oNcDUXxh2GHcxHkTEG4fjae2ytWP85jXRo=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "4a4ecb0ab415c9fccfb005567a215e6a9564cdf5",
+        "rev": "b3b2b28c1daa04fe2ae47c21bb76fd226eac4ca1",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixpkgs-unstable",
+        "ref": "nixos-24.05",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -88,11 +120,13 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
+        "gitignore": "gitignore",
+        "langref": "langref",
         "nixpkgs": "nixpkgs",
         "systems": "systems",
         "treefmt-nix": "treefmt-nix",
-        "zig": "zig",
-        "zls": "zls"
+        "zig-overlay": "zig-overlay",
+        "zls-flake": "zls-flake"
       }
     },
     "systems": {
@@ -130,7 +164,7 @@
         "type": "github"
       }
     },
-    "zig": {
+    "zig-overlay": {
       "inputs": {
         "flake-compat": "flake-compat",
         "flake-utils": [
@@ -154,18 +188,18 @@
         "type": "github"
       }
     },
-    "zls": {
+    "zls-flake": {
       "inputs": {
         "flake-utils": [
           "flake-utils"
         ],
-        "gitignore": "gitignore",
-        "langref": "langref",
+        "gitignore": "gitignore_2",
+        "langref": "langref_2",
         "nixpkgs": [
           "nixpkgs"
         ],
         "zig-overlay": [
-          "zig"
+          "zig-overlay"
         ]
       },
       "locked": {
