@@ -1,7 +1,9 @@
 #!/bin/env python3
 
-from os import listdir, remove
+from os import listdir
 from random import shuffle
+
+from Path import unlink
 
 if __name__ == "__main__":
     target_dir = "mount"
@@ -9,5 +11,4 @@ if __name__ == "__main__":
     shuffle(files)
     for file in files[::2]:
         path = target_dir + "/" + file
-        remove(path)
-        print("removed " + path)
+        unlink(path)

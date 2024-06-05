@@ -1,8 +1,10 @@
 #!/bin/env python3
 
-import string
 import random
+import string
 from os import sync
+
+from Path import open
 
 if __name__ == "__main__":
     out_dir = "mount"
@@ -12,5 +14,4 @@ if __name__ == "__main__":
         file_text = "this is the text for file " + file_name + "\n"
         with open(file_path, "w") as f:
             f.write(file_text)
-            print("created and wrote " + file_path)
     sync()
