@@ -1,6 +1,5 @@
 pub const c = @cImport({
     @cDefine("ASSERT", ""); // ASSERT is undefined, stub it
-    @cInclude("stddef.h");
     @cInclude("xfs/xfs.h");
     @cInclude("xfs/xfs_arch.h");
     @cInclude("xfs/xfs_format.h");
