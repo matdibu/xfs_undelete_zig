@@ -1,0 +1,7 @@
+{
+    "enable_build_on_save": true,
+    "warn_style": true,
+    "highlight_global_var_declarations": true,
+    "dangerous_comptime_experiments_do_not_enable": true,
+    "completion_label_details": false
+}
