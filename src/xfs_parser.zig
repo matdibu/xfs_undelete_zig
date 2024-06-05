@@ -161,7 +161,6 @@ pub const xfs_parser = struct {
             .file_offset = extent.file_offset,
             .block_offset = extent.block_offset - ag_offset / self.superblock.sb_blocksize,
             .block_count = extent.block_count,
-            .block_size = self.superblock.sb_blocksize,
             .state = extent.state,
         };
 
@@ -222,9 +221,13 @@ pub const xfs_parser = struct {
 
         while (left <= right) {
             middle = (left + right) / 2;
-            if (extent_begin.* > c.be32toh(keys.items[middle].ar_startblock)) {
+            const extent_middle = c.be32toh(keys.items[middle].ar_startblock);
+            if (extent_begin.* > extent_middle) {
                 left = middle + 1;
-            } else if (extent_end < c.be32toh(keys.items[middle].ar_startblock)) {
+            } else if (extent_end < extent_middle) {
+                if (middle == 0) {
+                    break;
+                }
                 right = middle - 1;
             } else {
                 right = middle;
@@ -275,6 +278,9 @@ pub const xfs_parser = struct {
             if (extent_begin.* > record_end) {
                 left_index = middle_index + 1;
             } else if (extent_end < record_begin) {
+                if (middle_index == 0) {
+                    break;
+                }
                 right_index = middle_index - 1;
             } else {
                 std.log.debug("found overlapping extent {d}->{d}", .{ record_begin, record_end });
@@ -292,7 +298,6 @@ pub const xfs_parser = struct {
                     .file_offset = extent.file_offset + target_begin - extent_begin.*,
                     .block_offset = target_begin,
                     .block_count = target_end - target_begin,
-                    .block_size = self.superblock.sb_blocksize,
                     .state = 0,
                 };
 
@@ -371,11 +376,16 @@ pub const xfs_parser = struct {
         );
 
         for (packed_extents.items) |packed_extent| {
-            const extent = xfs_extent_t.create(&packed_extent, self.superblock.sb_blocksize);
-            extent.check(&self.superblock) catch {
-                // too verbose
-                // std.log.debug("packed_extent skipped: {}", .{err});
-                continue;
+            const extent = xfs_extent_t.create(&packed_extent);
+            extent.check(&self.superblock) catch |err| switch (err) {
+                xfs_error.xfs_ext_zeroed,
+                xfs_error.xfs_ext_unwritten,
+                xfs_error.xfs_ext_beyond_sb,
+                => {
+                    // logging each invalid extent is too verbose
+                    // std.log.debug("packed_extent skipped: {}", .{err});
+                },
+                else => return err,
             };
             try self.only_within_agf(&extent, ag_index, agf_root, &extent_recovered_from_list);
         }

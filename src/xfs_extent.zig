@@ -12,9 +12,8 @@ pub const xfs_extent_t = struct {
     block_count: c.xfs_filblks_t,
     file_offset: c.xfs_fileoff_t,
     state: c.xfs_exntst_t,
-    block_size: usize, // needed in the dump_inodes callback
 
-    pub fn create(packed_extent: *const c.xfs_bmbt_rec_t, block_size: usize) xfs_extent_t {
+    pub fn create(packed_extent: *const c.xfs_bmbt_rec_t) xfs_extent_t {
         var irec: c.xfs_bmbt_irec = undefined;
 
         libxfs_bmbt_disk_get_all(packed_extent, &irec);
@@ -24,7 +23,6 @@ pub const xfs_extent_t = struct {
             .block_offset = irec.br_startblock,
             .file_offset = irec.br_startoff,
             .state = irec.br_state,
-            .block_size = block_size,
         };
     }
 
