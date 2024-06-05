@@ -6,6 +6,8 @@ pub const xfs_error = @import("xfs_error.zig").xfs_error;
 pub const xfs_superblock = @import("xfs_superblock.zig").xfs_superblock;
 
 const c = @import("c.zig").c;
+const xfs_mask64lo = @import("c.zig").xfs_mask64lo;
+const libxfs_bmbt_disk_get_all = @import("c.zig").libxfs_bmbt_disk_get_all;
 
 pub const xfs_extent_t = struct {
     block_offset: c.xfs_fsblock_t,
@@ -24,29 +26,6 @@ pub const xfs_extent_t = struct {
             .file_offset = irec.br_startoff,
             .state = irec.br_state,
         };
-    }
-
-    // copied from "xfsprogs-dev/libxfs/xfs_bit.h"
-    fn xfs_mask64lo(comptime n: u64) u64 {
-        return (1 << n) - 1;
-    }
-
-    // copied from "xfsprogs-dev/include/libxfs.h"
-    fn libxfs_bmbt_disk_get_all(
-        rec: *const c.xfs_bmbt_rec,
-        irec: *c.xfs_bmbt_irec,
-    ) void {
-        const l0: u64 = c.be64toh(rec.l0);
-        const l1: u64 = c.be64toh(rec.l1);
-
-        irec.br_startoff = (l0 & xfs_mask64lo(64 - c.BMBT_EXNTFLAG_BITLEN)) >> 9;
-        irec.br_startblock = ((l0 & xfs_mask64lo(9)) << 43) | (l1 >> c.BMBT_BLOCKCOUNT_BITLEN);
-        irec.br_blockcount = l1 & xfs_mask64lo(c.BMBT_BLOCKCOUNT_BITLEN);
-        if (0 != (l0 >> (64 - c.BMBT_EXNTFLAG_BITLEN))) {
-            irec.br_state = c.XFS_EXT_UNWRITTEN;
-        } else {
-            irec.br_state = c.XFS_EXT_NORM;
-        }
     }
 
     pub fn check(self: *const xfs_extent_t, superblock: *const xfs_superblock) xfs_error!void {
