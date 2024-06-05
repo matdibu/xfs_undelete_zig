@@ -65,6 +65,7 @@
             util-linux
             util-linux.dev
             python3
+            ruff-lsp
           ];
         };
       });
