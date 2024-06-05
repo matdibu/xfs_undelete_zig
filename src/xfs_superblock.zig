@@ -40,17 +40,17 @@ pub const FEAT_INCOMPAT = enum(u16) {
 };
 
 pub const xfs_superblock = struct {
-    sb_blocksize: u32 = undefined,
-    sb_agblocks: u32 = undefined,
-    sb_dblocks: u64 = undefined,
-    sb_sectsize: u16 = undefined,
-    sb_agcount: u32 = undefined,
-    sb_agblklog: u8 = undefined,
-    sb_inodesize: u16 = undefined,
-    sb_versionnum: u16 = undefined,
-    sb_features2: u32 = undefined,
-    sb_features_ro_compat: u32 = undefined,
-    sb_features_incompat: u32 = undefined,
+    sb_blocksize: u32,
+    sb_agblocks: u32,
+    sb_dblocks: u64,
+    sb_sectsize: u16,
+    sb_agcount: u32,
+    sb_agblklog: u8,
+    sb_inodesize: u16,
+    sb_versionnum: u16,
+    sb_features2: u32,
+    sb_features_ro_compat: u32,
+    sb_features_incompat: u32,
 
     pub fn init(dsb: *const c.xfs_dsb) xfs_error!xfs_superblock {
         if (c.XFS_SB_MAGIC != c.be32toh(dsb.sb_magicnum)) {
@@ -87,12 +87,11 @@ pub const xfs_superblock = struct {
     pub fn check_superblock_flags(self: *const xfs_superblock) xfs_error!void {
         const sb_version = c.XFS_SB_VERSION_NUMBITS & self.sb_versionnum;
         switch (sb_version) {
-            c.XFS_SB_VERSION_1,
-            c.XFS_SB_VERSION_2,
-            c.XFS_SB_VERSION_3,
-            c.XFS_SB_VERSION_4,
-            c.XFS_SB_VERSION_5,
-            => std.log.debug("sb_version={d}", .{sb_version}),
+            c.XFS_SB_VERSION_5 => std.log.debug("sb_version={d}", .{sb_version}),
+            c.XFS_SB_VERSION_1, c.XFS_SB_VERSION_2, c.XFS_SB_VERSION_3, c.XFS_SB_VERSION_4 => {
+                std.log.err("unhandled sb_version={d}", .{sb_version});
+                return xfs_error.sb_version;
+            },
             else => {
                 std.log.err("unknown sb_version={d}", .{sb_version});
                 return xfs_error.sb_version;
