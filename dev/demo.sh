@@ -4,7 +4,7 @@ set -e
 
 DEVICE_IMG="$(realpath xfs_device.img)"
 MOUNT_DIR="mount"
-UNDELETED_DIR="undeleted"
+UNDELETED_DIR="recovered"
 
 dd if=/dev/zero of="${DEVICE_IMG}" bs=4M count=128
 mkfs.xfs "${DEVICE_IMG}" -f
