@@ -57,49 +57,65 @@
       });
 
       # for `nix build`
-      packages = eachSystem (pkgs: let zig = inputs.zig-overlay.packages.${pkgs.system}.master; in {
-        default = self.packages.${pkgs.system}.xfs_undelete;
-        "xfs_undelete" = pkgs.stdenvNoCC.mkDerivation {
-          name = "xfs_undelete";
-          version = "master";
-          src = gitignoreSource ./.;
-          strictDeps = true;
-          nativeBuildInputs = [ zig pkgs.libuuid.dev pkgs.libxfs.dev pkgs.pkg-config ];
-          buildInputs = [ zig pkgs.libuuid.dev pkgs.libxfs.dev pkgs.pkg-config ];
-          dontConfigure = true;
-          dontInstall = true;
-          doCheck = true;
-          patchPhase = ''
-            substituteInPlace build.zig \
-                --replace-fail "/nix/store/1s5mym5ar49hwqmxn9baasyw0kbckgmf-xfsprogs-6.8.0-dev/" \
-                "${pkgs.libxfs.dev}/"
+      packages = eachSystem (
+        pkgs:
+        let
+          zig = inputs.zig-overlay.packages.${pkgs.system}.master;
+        in
+        {
+          default = self.packages.${pkgs.system}.xfs_undelete;
+          "xfs_undelete" = pkgs.stdenvNoCC.mkDerivation {
+            name = "xfs_undelete";
+            version = "master";
+            src = gitignoreSource ./.;
+            strictDeps = true;
+            nativeBuildInputs = [
+              zig
+              pkgs.libuuid.dev
+              pkgs.libxfs.dev
+              pkgs.pkg-config
+            ];
+            buildInputs = [
+              zig
+              pkgs.libuuid.dev
+              pkgs.libxfs.dev
+              pkgs.pkg-config
+            ];
+            dontConfigure = true;
+            dontInstall = true;
+            doCheck = true;
+            patchPhase = ''
+              substituteInPlace build.zig \
+                  --replace-fail "/nix/store/1s5mym5ar49hwqmxn9baasyw0kbckgmf-xfsprogs-6.8.0-dev/" \
+                  "${pkgs.libxfs.dev}/"
 
-            substituteInPlace build.zig \
-                --replace-fail "/nix/store/sw3a1cypmpgh8gvlhhxby0wl9f80wg53-util-linux-minimal-2.40.1-dev/" \
-                "${pkgs.libuuid.dev}/"
-          '';
-          buildPhase = ''
-            mkdir -p .cache
-            ln -s \
-                ${pkgs.callPackage ./deps.nix { inherit zig; }} \
-                .cache/p
-            zig build \
-                --verbose \
-                -freference-trace \
-                --prefix $out \
-                --cache-dir $(pwd)/.zig-cache \
-                --global-cache-dir $(pwd)/.cache \
-                -Dcpu=baseline
-          '';
-          checkPhase = ''
-            zig build test \
-                -freference-trace \
-                --cache-dir $(pwd)/.zig-cache \
-                --global-cache-dir $(pwd)/.cache \
-                -Dcpu=baseline
-          '';
-        };
-      });
+              substituteInPlace build.zig \
+                  --replace-fail "/nix/store/sw3a1cypmpgh8gvlhhxby0wl9f80wg53-util-linux-minimal-2.40.1-dev/" \
+                  "${pkgs.libuuid.dev}/"
+            '';
+            buildPhase = ''
+              mkdir -p .cache
+              ln -s \
+                  ${pkgs.callPackage ./deps.nix { inherit zig; }} \
+                  .cache/p
+              zig build \
+                  --verbose \
+                  -freference-trace \
+                  --prefix $out \
+                  --cache-dir $(pwd)/.zig-cache \
+                  --global-cache-dir $(pwd)/.cache \
+                  -Dcpu=baseline
+            '';
+            checkPhase = ''
+              zig build test \
+                  -freference-trace \
+                  --cache-dir $(pwd)/.zig-cache \
+                  --global-cache-dir $(pwd)/.cache \
+                  -Dcpu=baseline
+            '';
+          };
+        }
+      );
 
       # for `nix develop`
       devShells = eachSystem (pkgs: {
