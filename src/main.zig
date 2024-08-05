@@ -45,7 +45,7 @@ pub fn main() !void {
 
     try r.run(&app);
 
-    gpa.detectLeaks();
+    _ = gpa.detectLeaks();
 }
 
 fn saveInodeEntry(entry: *const xp.inode_entry) !void {
